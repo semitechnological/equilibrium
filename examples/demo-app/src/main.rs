@@ -41,7 +41,11 @@ fn main() {
     let c_source = std::path::Path::new(manifest).join("foreign-code/math.c");
 
     if let Some(lang) = equilibrium::detect_language(&c_source) {
-        println!("detect_language({:?}) = {:?}", c_source.file_name().unwrap(), lang);
+        println!(
+            "detect_language({:?}) = {:?}",
+            c_source.file_name().unwrap(),
+            lang
+        );
     }
 
     if let Some(info) = equilibrium::find_compiler(equilibrium::Language::C) {

@@ -200,7 +200,15 @@ fn parse_function_line(line: &str) -> Option<FunctionDef> {
                 let p = p.trim();
                 let parts: Vec<&str> = p.rsplitn(2, ' ').collect();
                 if parts.len() == 2 {
-                    Some((parts[1].to_string(), parts[0].to_string()))
+                    // Handle `const char *name` — `*` may be stuck to the name.
+                    // C notation puts `*` at the end of the type, e.g. `const char *`.
+                    let (mut typ, mut name) = (parts[1].to_string(), parts[0].to_string());
+                    if name.starts_with('*') {
+                        let stars: String = name.chars().take_while(|&c| c == '*').collect();
+                        name = name[stars.len()..].to_string();
+                        typ = format!("{} {}", typ, stars);
+                    }
+                    Some((typ, name))
                 } else {
                     None
                 }
@@ -389,11 +397,7 @@ mod tests {
     fn test_generate_bindings_basic() {
         let dir = tempdir().unwrap();
         let header = dir.path().join("mylib.h");
-        std::fs::write(
-            &header,
-            "int add(int a, int b);\nvoid noop(void);\n",
-        )
-        .unwrap();
+        std::fs::write(&header, "int add(int a, int b);\nvoid noop(void);\n").unwrap();
 
         let opts = BindingOptions::default();
         let binding = generate_bindings(&header, &opts).unwrap();

@@ -1,0 +1,14 @@
+[package]
+name = "polyglot-gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+equilibrium = { path = "../.." }
+crepuscularity-web = { git = "https://github.com/semitechnological/crepuscularity" }
+crepuscularity-core = { git = "https://github.com/semitechnological/crepuscularity" }
+
+[build-dependencies]
+cc = "1"
+equilibrium = { path = "../.." }
+which = "6"

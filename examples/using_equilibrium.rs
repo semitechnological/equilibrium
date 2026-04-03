@@ -1,7 +1,9 @@
 //! Example showing the full equilibrium pipeline:
 //! detect language → compile to C → generate Rust FFI bindings
 
-use equilibrium::{compile_to_c, detect_language, find_compiler, generate_bindings, BindingOptions};
+use equilibrium::{
+    compile_to_c, detect_language, find_compiler, generate_bindings, BindingOptions,
+};
 use std::path::Path;
 
 fn main() {
@@ -85,7 +87,12 @@ fn main() {
 
             // Print a snippet of the generated code
             println!("\n   Generated bindings (excerpt):");
-            for line in binding.code.lines().filter(|l| !l.starts_with("//!")).take(20) {
+            for line in binding
+                .code
+                .lines()
+                .filter(|l| !l.starts_with("//!"))
+                .take(20)
+            {
                 println!("   {}", line);
             }
         }

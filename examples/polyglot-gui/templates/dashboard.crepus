@@ -1,0 +1,78 @@
+# Equilibrium — Polyglot Dashboard
+# Rendered by crepuscularity-web (semitechnological/crepuscularity)
+
+div w-full min-h-screen bg-zinc-950 text-white font-mono
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    div w-full bg-zinc-900 border-b border-zinc-800 px-8 py-6
+
+        div text-3xl font-bold tracking-tight
+            "Equilibrium · Polyglot Dashboard"
+
+        div text-zinc-400 text-sm mt-1
+            "Foreign-language modules compiled and called via auto-generated FFI bindings"
+
+        div flex gap-6 mt-4 text-xs text-zinc-500
+            div
+                "Languages supported: {total_languages}"
+            div
+                "Compilers found: {compilers_found}"
+            div
+                "Modules linked: {modules_linked}"
+
+    # ── Language cards ───────────────────────────────────────────────────────
+    div px-8 py-6 grid gap-4
+
+        for lang in {languages}
+
+            div rounded-xl border p-5
+
+                # Card header: name + status badge
+                div flex items-start justify-between mb-4
+
+                    div
+                        div flex items-center gap-3
+                            div text-lg font-bold
+                                "{lang.name}"
+                            div text-xs px-2 py-0.5 rounded font-mono bg-zinc-800 text-zinc-300
+                                "{lang.extension}"
+
+                        div text-xs text-zinc-500 mt-1
+                            "{lang.compiler_info}"
+
+                    if {lang.linked}
+                        div bg-emerald-500 text-black text-xs font-bold px-3 py-1 rounded-full
+                            "LINKED"
+                    else if {lang.compiler_found}
+                        div bg-amber-500 text-black text-xs font-bold px-3 py-1 rounded-full
+                            "FOUND"
+                    else
+                        div bg-zinc-700 text-zinc-400 text-xs px-3 py-1 rounded-full
+                            "NOT FOUND"
+
+                # Function and result
+                div text-xs text-zinc-500 mb-1 font-mono
+                    "{lang.fn_sig}"
+
+                if {lang.linked}
+                    div text-emerald-400 font-mono text-sm mt-1
+                        "→  {lang.result}"
+                else if {lang.compiler_found}
+                    div text-amber-300 text-sm mt-1 italic
+                        "Compiler available — not linked in this build"
+                else
+                    div text-zinc-600 text-sm mt-1 italic
+                        "{lang.reason}"
+
+                # Source file path
+                div text-zinc-700 text-xs mt-3
+                    "source: {lang.source_file}"
+
+    # ── Footer ───────────────────────────────────────────────────────────────
+    div px-8 py-4 border-t border-zinc-800 text-zinc-600 text-xs flex justify-between
+
+        div
+            "equilibrium · crepuscularity-equilibrium"
+
+        div
+            "GUI rendered by crepuscularity-web (semitechnological/crepuscularity)"

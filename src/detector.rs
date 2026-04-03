@@ -365,7 +365,10 @@ mod tests {
     fn test_find_compiler_c_available() {
         // clang or gcc is expected in any dev environment
         let info = find_compiler(Language::C);
-        assert!(info.is_some(), "expected a C compiler (clang/gcc) to be on PATH");
+        assert!(
+            info.is_some(),
+            "expected a C compiler (clang/gcc) to be on PATH"
+        );
         let info = info.unwrap();
         assert!(info.compiler.is_some());
     }

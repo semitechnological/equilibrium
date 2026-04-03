@@ -13,8 +13,9 @@ cargo build --release
 cargo test
 cargo test test_detect_v          # Run a single test by name
 
-# Lint / Format
-cargo fmt -- --check              # Check formatting
+# Lint / Format — always run cargo fmt before committing
+cargo fmt                         # Auto-fix formatting
+cargo fmt -- --check              # Check formatting (CI gate)
 cargo clippy -- -D warnings       # Lint (warnings as errors)
 
 # Docs
@@ -46,5 +47,11 @@ Language-specific ergonomic crates live in sibling directories:
 
 ### Examples
 
-- `examples/using_equilibrium.rs` — demonstrates the three pipeline stages (detect, compile, generate bindings)
-- `examples/full-demo/` — end-to-end working demo that compiles a C calculator library and calls it from Rust via the `cc` crate
+- `examples/using_equilibrium.rs` — demonstrates all three pipeline stages (detect, compile, generate bindings, scan_directory)
+- `examples/demo-app/` — minimal end-to-end demo: `build.rs` compiles `math.c` via `cc` and generates bindings with equilibrium; `main.rs` calls C functions through the generated `include!()`d bindings
+- `examples/full-demo/` — full demo calling a C calculator library from Rust
+- `examples/polyglot-gui/` — polyglot dashboard app with one foreign-language module per supported language (C, C++, Zig, V, D, Nim, Odin, Hare, C#, Rust); `build.rs` compiles C/C++/Zig at build time and sets `cfg(has_c/has_cpp/has_zig)`; the app calls linked FFI functions and renders an HTML dashboard via [crepuscularity-web](https://github.com/semitechnological/crepuscularity)
+
+### Zig FFI notes
+
+Zig objects must be compiled with `-fPIC -OReleaseFast` to link cleanly into Rust's PIE binary. `ReleaseFast` removes safety checks that otherwise pull in Zig's stdlib panic infrastructure, which conflicts with the linker. See `examples/polyglot-gui/build.rs`.
