@@ -125,7 +125,7 @@ struct FunctionDef {
 
 fn parse_c_header(content: &str) -> ParsedHeader {
     let mut typedefs = Vec::new();
-    let mut structs = Vec::new();
+    let structs = Vec::new();
     let mut functions = Vec::new();
 
     for line in content.lines() {
