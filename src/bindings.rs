@@ -48,14 +48,10 @@ pub fn generate_bindings(
     let mut warnings = Vec::new();
     let mut code = String::new();
 
-    // Module header
-    code.push_str("//! Auto-generated bindings by crepuscularity-equilibrium\n");
-    code.push_str("//!\n");
-    code.push_str(&format!("//! Source: {}\n", header.display()));
-    code.push('\n');
-    code.push_str("#![allow(non_camel_case_types)]\n");
-    code.push_str("#![allow(non_snake_case)]\n");
-    code.push_str("#![allow(dead_code)]\n");
+    // File header — use regular // comments so the output is valid when include!()'d into a module
+    code.push_str("// Auto-generated bindings by crepuscularity-equilibrium\n");
+    code.push_str("//\n");
+    code.push_str(&format!("// Source: {}\n", header.display()));
     code.push('\n');
     code.push_str("use std::os::raw::*;\n");
     code.push('\n');
@@ -80,6 +76,7 @@ pub fn generate_bindings(
     }
 
     // Generate extern block with functions
+    code.push_str("#[allow(non_camel_case_types, non_snake_case, dead_code)]\n");
     code.push_str("extern \"C\" {\n");
     for func in &parsed.functions {
         if should_include(&func.name, &options.allowlist_functions) {
@@ -313,6 +310,7 @@ fn c_type_to_rust(c_type: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_c_type_to_rust() {
@@ -320,6 +318,21 @@ mod tests {
         assert_eq!(c_type_to_rust("void"), "()");
         assert_eq!(c_type_to_rust("char *"), "*mut c_char");
         assert_eq!(c_type_to_rust("const char *"), "*const c_char");
+    }
+
+    #[test]
+    fn test_c_type_to_rust_extended() {
+        assert_eq!(c_type_to_rust("unsigned int"), "c_uint");
+        assert_eq!(c_type_to_rust("unsigned long"), "c_ulong");
+        assert_eq!(c_type_to_rust("long long"), "c_longlong");
+        assert_eq!(c_type_to_rust("size_t"), "usize");
+        assert_eq!(c_type_to_rust("ssize_t"), "isize");
+        assert_eq!(c_type_to_rust("bool"), "bool");
+        assert_eq!(c_type_to_rust("float"), "c_float");
+        assert_eq!(c_type_to_rust("double"), "c_double");
+        assert_eq!(c_type_to_rust("void*"), "*mut c_void");
+        // const stripping
+        assert_eq!(c_type_to_rust("const int"), "c_int");
     }
 
     #[test]
@@ -331,9 +344,118 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_function_void_params() {
+        let func = parse_function_line("void cleanup(void);").unwrap();
+        assert_eq!(func.name, "cleanup");
+        assert_eq!(func.return_type, "void");
+        assert_eq!(func.params.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_function_no_params() {
+        let func = parse_function_line("int get_count();").unwrap();
+        assert_eq!(func.name, "get_count");
+        assert_eq!(func.return_type, "int");
+        assert_eq!(func.params.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_function_pointer_param() {
+        let func = parse_function_line("int string_length(const char* str);").unwrap();
+        assert_eq!(func.name, "string_length");
+        assert_eq!(func.return_type, "int");
+        assert_eq!(func.params.len(), 1);
+    }
+
+    #[test]
     fn test_parse_typedef() {
         let (target, name) = parse_typedef_line("typedef int myint;").unwrap();
         assert_eq!(name, "myint");
         assert_eq!(target, "int");
+    }
+
+    #[test]
+    fn test_parse_header_with_guards() {
+        // Preprocessor directives should be ignored; typedefs inside guards should parse
+        let content = "#ifndef MYLIB_H\n#define MYLIB_H\ntypedef int myint;\nint add(int a, int b);\n#endif\n";
+        let parsed = parse_c_header(content);
+        assert_eq!(parsed.typedefs.len(), 1);
+        assert_eq!(parsed.typedefs[0].name, "myint");
+        assert_eq!(parsed.functions.len(), 1);
+        assert_eq!(parsed.functions[0].name, "add");
+    }
+
+    #[test]
+    fn test_generate_bindings_basic() {
+        let dir = tempdir().unwrap();
+        let header = dir.path().join("mylib.h");
+        std::fs::write(
+            &header,
+            "int add(int a, int b);\nvoid noop(void);\n",
+        )
+        .unwrap();
+
+        let opts = BindingOptions::default();
+        let binding = generate_bindings(&header, &opts).unwrap();
+
+        assert!(binding.code.contains("extern \"C\""));
+        assert!(binding.code.contains("pub fn add("));
+        assert!(binding.code.contains("pub fn noop()"));
+        assert!(binding.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_generate_bindings_missing_file() {
+        let opts = BindingOptions::default();
+        let result = generate_bindings(Path::new("/nonexistent/header.h"), &opts);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_generate_bindings_allowlist_functions() {
+        let dir = tempdir().unwrap();
+        let header = dir.path().join("mylib.h");
+        std::fs::write(&header, "int add(int a, int b);\nint sub(int a, int b);\n").unwrap();
+
+        let opts = BindingOptions {
+            allowlist_functions: vec!["add".to_string()],
+            ..Default::default()
+        };
+        let binding = generate_bindings(&header, &opts).unwrap();
+        assert!(binding.code.contains("pub fn add("));
+        assert!(!binding.code.contains("pub fn sub("));
+        assert_eq!(binding.warnings.len(), 1);
+        assert!(binding.warnings[0].contains("sub"));
+    }
+
+    #[test]
+    fn test_generate_bindings_mathlib_header() {
+        // Verify against the real mathlib.h in the repo
+        let header = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/c-ffi/mathlib.h");
+        if !header.exists() {
+            return;
+        }
+
+        let opts = BindingOptions::default();
+        let binding = generate_bindings(&header, &opts).unwrap();
+
+        assert!(binding.code.contains("pub fn add("));
+        assert!(binding.code.contains("pub fn subtract("));
+        assert!(binding.code.contains("pub fn multiply("));
+        assert!(binding.code.contains("pub fn fibonacci("));
+        assert!(binding.code.contains("pub fn string_length("));
+    }
+
+    #[test]
+    fn test_generate_bindings_with_typedef() {
+        let dir = tempdir().unwrap();
+        let header = dir.path().join("types.h");
+        std::fs::write(&header, "typedef int handle_t;\nhandle_t open(void);\n").unwrap();
+
+        let opts = BindingOptions::default();
+        let binding = generate_bindings(&header, &opts).unwrap();
+        assert!(binding.code.contains("pub type handle_t = c_int;"));
+        assert!(binding.code.contains("pub fn open()"));
     }
 }

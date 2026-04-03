@@ -1,69 +1,54 @@
-//! Polyglot Calculator - Demonstrates equilibrium calling C functions from Rust
+//! Polyglot Calculator — end-to-end equilibrium demo
+//!
+//! build.rs compiles foreign-code/math.c and uses equilibrium to generate
+//! Rust FFI bindings automatically. This file just calls those functions.
 
-use std::path::{Path, PathBuf};
+// Pull in the bindings that build.rs wrote to OUT_DIR
+mod ffi {
+    include!(concat!(env!("OUT_DIR"), "/math_bindings.rs"));
+}
 
 fn main() {
-    println!("=== Polyglot Calculator Demo ===\n");
-    
-    // Get absolute paths
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let c_source = manifest_dir.join("foreign-code/math.c");
-    let build_dir = manifest_dir.join("build");
-    
-    // Step 1: Compile C code
-    println!("Step 1: Compiling C math library...");
-    println!("  Source: {}", c_source.display());
-    
-    std::fs::create_dir_all(&build_dir).unwrap();
-    
-    match equilibrium::compile_to_c(&c_source, &build_dir) {
-        Ok(result) => {
-            println!("✓ Compiled successfully");
-            println!("  Output: {}", result.output_path.display());
-            
-            // Step 2: Parse the output to find function signatures
-            println!("\nStep 2: Analyzing functions...");
-            if let Ok(content) = std::fs::read_to_string(&result.output_path) {
-                let functions: Vec<&str> = content.lines()
-                    .filter(|l| l.contains("int c_"))
-                    .filter(|l| l.contains('('))
-                    .filter(|l| !l.trim().starts_with("//"))
-                    .filter(|l| !l.trim().starts_with('#'))
-                    .take(5)
-                    .collect();
-                
-                if !functions.is_empty() {
-                    println!("  Found {} function(s):", functions.len());
-                    for func in functions {
-                        let trimmed = func.trim();
-                        if trimmed.len() < 80 {
-                            println!("    {}", trimmed);
-                        }
-                    }
-                } else {
-                    println!("  (Functions are in preprocessed output)");
-                }
-            }
-            
-            println!("\n=== Next Steps ===");
-            println!("\nTo actually use these C functions in Rust:");
-            println!("\n1. Generate FFI bindings:");
-            println!("   let bindings = equilibrium::generate_bindings(&header)?;");
-            println!("\n2. Write bindings to file:");
-            println!("   std::fs::write(\"src/ffi.rs\", bindings.rust_code)?;");
-            println!("\n3. Use in Rust:");
-            println!("   mod ffi;");
-            println!("   let sum = unsafe {{ ffi::c_add(5, 3) }};");
-            println!("   println!(\"5 + 3 = {{}}\", sum);");
-            
-            println!("\n✓ Demo complete!");
-        }
-        Err(e) => {
-            eprintln!("✗ Compilation failed: {}", e);
-            eprintln!("\nThis might mean:");
-            eprintln!("  - C compiler not found (install clang or gcc)");
-            eprintln!("  - Source file missing");
-            std::process::exit(1);
-        }
+    println!("=== Polyglot Calculator Demo ===");
+    println!("C functions called directly from Rust via auto-generated FFI bindings\n");
+
+    unsafe {
+        // Basic arithmetic
+        let sum = ffi::c_add(7, 3);
+        println!("c_add(7, 3)       = {}", sum);
+        assert_eq!(sum, 10);
+
+        // Factorial
+        let f5 = ffi::c_factorial(5);
+        println!("c_factorial(5)    = {}", f5);
+        assert_eq!(f5, 120);
+
+        let f10 = ffi::c_factorial(10);
+        println!("c_factorial(10)   = {}", f10);
+        assert_eq!(f10, 3628800);
+    }
+
+    println!("\n✓ All assertions passed!");
+    println!("\nHow it works:");
+    println!("  1. build.rs compiles foreign-code/math.c into a static library via the cc crate");
+    println!("  2. build.rs calls equilibrium::generate_bindings() on math.h");
+    println!("  3. The generated bindings are written to $OUT_DIR/math_bindings.rs");
+    println!("  4. This file includes those bindings with include!() and calls them directly");
+
+    // Also demonstrate the equilibrium library functions at runtime
+    println!("\n--- Runtime equilibrium API ---");
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let c_source = std::path::Path::new(manifest).join("foreign-code/math.c");
+
+    if let Some(lang) = equilibrium::detect_language(&c_source) {
+        println!("detect_language({:?}) = {:?}", c_source.file_name().unwrap(), lang);
+    }
+
+    if let Some(info) = equilibrium::find_compiler(equilibrium::Language::C) {
+        println!(
+            "find_compiler(C) = {} {}",
+            info.compiler.as_deref().unwrap_or("?"),
+            info.version.as_deref().unwrap_or("")
+        );
     }
 }

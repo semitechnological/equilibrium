@@ -30,5 +30,5 @@ mod compiler;
 mod detector;
 
 pub use bindings::{generate_bindings, BindingOptions, GeneratedBinding};
-pub use compiler::{compile_to_c, CompileError, CompileResult};
-pub use detector::{detect_language, find_compiler, Language, LanguageInfo};
+pub use compiler::{compile_batch, compile_to_c, CompileError, CompileResult};
+pub use detector::{detect_language, find_compiler, scan_directory, Language, LanguageInfo};

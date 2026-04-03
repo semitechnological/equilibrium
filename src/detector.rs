@@ -93,7 +93,6 @@ impl Language {
                 // For actual code, we emit object files
                 vec![
                     "build-obj".to_string(),
-                    "-femit-bin".to_string(),
                     format!("-femit-bin={output}"),
                     input.to_string(),
                 ]
@@ -282,6 +281,7 @@ pub fn scan_directory(dir: &Path) -> Vec<(std::path::PathBuf, Language)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_detect_v() {
@@ -324,13 +324,119 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_c_and_header() {
+        assert_eq!(detect_language(Path::new("main.c")), Some(Language::C));
+        assert_eq!(detect_language(Path::new("lib.h")), Some(Language::C));
+    }
+
+    #[test]
+    fn test_detect_rust() {
+        assert_eq!(detect_language(Path::new("main.rs")), Some(Language::Rust));
+    }
+
+    #[test]
+    fn test_detect_csharp() {
+        assert_eq!(
+            detect_language(Path::new("Program.cs")),
+            Some(Language::CSharp)
+        );
+    }
+
+    #[test]
     fn test_detect_unknown() {
         assert_eq!(detect_language(Path::new("foo.py")), None);
         assert_eq!(detect_language(Path::new("foo.js")), None);
+        assert_eq!(detect_language(Path::new("Makefile")), None);
+    }
+
+    #[test]
+    fn test_detect_case_insensitive_extension() {
+        // Extensions are lowercased before matching
+        assert_eq!(detect_language(Path::new("FOO.C")), Some(Language::C));
+        assert_eq!(detect_language(Path::new("main.RS")), Some(Language::Rust));
     }
 
     #[test]
     fn test_all_languages() {
         assert_eq!(Language::all().len(), 10);
+    }
+
+    #[test]
+    fn test_find_compiler_c_available() {
+        // clang or gcc is expected in any dev environment
+        let info = find_compiler(Language::C);
+        assert!(info.is_some(), "expected a C compiler (clang/gcc) to be on PATH");
+        let info = info.unwrap();
+        assert!(info.compiler.is_some());
+    }
+
+    #[test]
+    fn test_find_compiler_returns_version() {
+        if let Some(info) = find_compiler(Language::C) {
+            // version is best-effort; just ensure the field exists (may be None on exotic setups)
+            let _ = info.version;
+        }
+    }
+
+    #[test]
+    fn test_to_c_args_c_preprocess() {
+        let args = Language::C.to_c_args("foo.c", "foo.i");
+        assert!(args.contains(&"-E".to_string()));
+        assert!(args.contains(&"foo.c".to_string()));
+        assert!(args.contains(&"foo.i".to_string()));
+    }
+
+    #[test]
+    fn test_to_c_args_zig_no_duplicate_flag() {
+        let args = Language::Zig.to_c_args("foo.zig", "foo.o");
+        assert!(args.contains(&"build-obj".to_string()));
+        let femit_count = args.iter().filter(|a| a.starts_with("-femit-bin")).count();
+        assert_eq!(femit_count, 1, "should have exactly one -femit-bin flag");
+    }
+
+    #[test]
+    fn test_scan_directory_empty() {
+        let dir = tempdir().unwrap();
+        let results = scan_directory(dir.path());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scan_directory_finds_sources() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("lib.c"), "").unwrap();
+        std::fs::write(dir.path().join("lib.v"), "").unwrap();
+        std::fs::write(dir.path().join("README.md"), "").unwrap(); // not a source file
+
+        let results = scan_directory(dir.path());
+        assert_eq!(results.len(), 2);
+        let langs: Vec<Language> = results.iter().map(|(_, l)| *l).collect();
+        assert!(langs.contains(&Language::C));
+        assert!(langs.contains(&Language::V));
+    }
+
+    #[test]
+    fn test_scan_directory_skips_target() {
+        let dir = tempdir().unwrap();
+        let target_dir = dir.path().join("target");
+        std::fs::create_dir(&target_dir).unwrap();
+        std::fs::write(target_dir.join("generated.c"), "").unwrap(); // should be skipped
+        std::fs::write(dir.path().join("main.rs"), "").unwrap();
+
+        let results = scan_directory(dir.path());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, Language::Rust);
+    }
+
+    #[test]
+    fn test_scan_directory_recurses() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("src");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("lib.zig"), "").unwrap();
+
+        let results = scan_directory(dir.path());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, Language::Zig);
     }
 }
