@@ -34,13 +34,16 @@ pub struct GeneratedBinding {
 ///
 /// This creates a Rust module with extern "C" declarations
 /// that can be used to call the compiled C code.
-pub fn generate_bindings(header: &Path, options: &BindingOptions) -> Result<GeneratedBinding, String> {
+pub fn generate_bindings(
+    header: &Path,
+    options: &BindingOptions,
+) -> Result<GeneratedBinding, String> {
     if !header.exists() {
         return Err(format!("Header file not found: {}", header.display()));
     }
 
-    let content = std::fs::read_to_string(header)
-        .map_err(|e| format!("Failed to read header: {e}"))?;
+    let content =
+        std::fs::read_to_string(header).map_err(|e| format!("Failed to read header: {e}"))?;
 
     let mut warnings = Vec::new();
     let mut code = String::new();
@@ -49,13 +52,13 @@ pub fn generate_bindings(header: &Path, options: &BindingOptions) -> Result<Gene
     code.push_str("//! Auto-generated bindings by crepuscularity-equilibrium\n");
     code.push_str("//!\n");
     code.push_str(&format!("//! Source: {}\n", header.display()));
-    code.push_str("\n");
+    code.push('\n');
     code.push_str("#![allow(non_camel_case_types)]\n");
     code.push_str("#![allow(non_snake_case)]\n");
     code.push_str("#![allow(dead_code)]\n");
-    code.push_str("\n");
+    code.push('\n');
     code.push_str("use std::os::raw::*;\n");
-    code.push_str("\n");
+    code.push('\n');
 
     // Parse and generate bindings
     let parsed = parse_c_header(&content);
@@ -64,7 +67,7 @@ pub fn generate_bindings(header: &Path, options: &BindingOptions) -> Result<Gene
     for typedef in &parsed.typedefs {
         if should_include(&typedef.name, &options.allowlist_types) {
             code.push_str(&generate_typedef(typedef, options));
-            code.push_str("\n");
+            code.push('\n');
         }
     }
 
@@ -72,7 +75,7 @@ pub fn generate_bindings(header: &Path, options: &BindingOptions) -> Result<Gene
     for struct_def in &parsed.structs {
         if should_include(&struct_def.name, &options.allowlist_types) {
             code.push_str(&generate_struct(struct_def, options));
-            code.push_str("\n");
+            code.push('\n');
         }
     }
 
@@ -139,7 +142,11 @@ fn parse_c_header(content: &str) -> ParsedHeader {
         }
 
         // Simple function declaration detection
-        if !line.starts_with("typedef") && !line.starts_with("struct") && line.contains('(') && line.ends_with(';') {
+        if !line.starts_with("typedef")
+            && !line.starts_with("struct")
+            && line.contains('(')
+            && line.ends_with(';')
+        {
             if let Some(func) = parse_function_line(line) {
                 functions.push(func);
             }

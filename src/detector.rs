@@ -256,7 +256,16 @@ pub fn scan_directory(dir: &Path) -> Vec<(std::path::PathBuf, Language)> {
                 if path.is_dir() {
                     // Skip common non-source directories
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if !matches!(name, "target" | "node_modules" | ".git" | "build" | "dist" | "zig-cache" | "nimcache") {
+                    if !matches!(
+                        name,
+                        "target"
+                            | "node_modules"
+                            | ".git"
+                            | "build"
+                            | "dist"
+                            | "zig-cache"
+                            | "nimcache"
+                    ) {
                         visit(&path, results);
                     }
                 } else if let Some(lang) = detect_language(&path) {

@@ -25,10 +25,10 @@
 //! let bindings = generate_bindings(&c_output)?;
 //! ```
 
+mod bindings;
 mod compiler;
 mod detector;
-mod bindings;
 
+pub use bindings::{generate_bindings, BindingOptions, GeneratedBinding};
 pub use compiler::{compile_to_c, CompileError, CompileResult};
 pub use detector::{detect_language, find_compiler, Language, LanguageInfo};
-pub use bindings::{generate_bindings, BindingOptions, GeneratedBinding};

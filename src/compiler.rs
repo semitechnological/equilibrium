@@ -11,7 +11,10 @@ pub enum CompileError {
     /// Compiler not found on system.
     CompilerNotFound { language: Language },
     /// Compilation failed.
-    CompilationFailed { stderr: String, exit_code: Option<i32> },
+    CompilationFailed {
+        stderr: String,
+        exit_code: Option<i32>,
+    },
     /// IO error.
     Io(std::io::Error),
     /// Language doesn't support C output.
@@ -60,11 +63,12 @@ pub struct CompileResult {
 
 /// Compile a source file to C intermediate representation.
 pub fn compile_to_c(input: &Path, output_dir: &Path) -> Result<CompileResult, CompileError> {
-    let language = crate::detector::detect_language(input)
-        .ok_or_else(|| CompileError::Io(std::io::Error::new(
+    let language = crate::detector::detect_language(input).ok_or_else(|| {
+        CompileError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "Unknown source language",
-        )))?;
+        ))
+    })?;
 
     compile_to_c_with_lang(input, output_dir, language)
 }
@@ -76,13 +80,13 @@ pub fn compile_to_c_with_lang(
     language: Language,
 ) -> Result<CompileResult, CompileError> {
     // Find compiler
-    let info = find_compiler(language)
-        .ok_or(CompileError::CompilerNotFound { language })?;
+    let info = find_compiler(language).ok_or(CompileError::CompilerNotFound { language })?;
 
     let compiler = info.compiler.as_ref().unwrap();
 
     // Determine output file name
-    let stem = input.file_stem()
+    let stem = input
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
 
@@ -128,8 +132,13 @@ pub fn compile_to_c_with_lang(
 }
 
 /// Generate a C header file for the compiled code.
-fn generate_header(input: &Path, output_dir: &Path, language: Language) -> Result<PathBuf, CompileError> {
-    let stem = input.file_stem()
+fn generate_header(
+    input: &Path,
+    output_dir: &Path,
+    language: Language,
+) -> Result<PathBuf, CompileError> {
+    let stem = input
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
 
@@ -141,9 +150,15 @@ fn generate_header(input: &Path, output_dir: &Path, language: Language) -> Resul
             if which::which("cbindgen").is_ok() {
                 let output = Command::new("cbindgen")
                     .args([
-                        "--lang", "c",
-                        "--output", header_path.to_string_lossy().as_ref(),
-                        input.parent().unwrap_or(Path::new(".")).to_string_lossy().as_ref(),
+                        "--lang",
+                        "c",
+                        "--output",
+                        header_path.to_string_lossy().as_ref(),
+                        input
+                            .parent()
+                            .unwrap_or(Path::new("."))
+                            .to_string_lossy()
+                            .as_ref(),
                     ])
                     .output()?;
 
@@ -184,7 +199,9 @@ mod tests {
 
     #[test]
     fn test_compile_error_display() {
-        let err = CompileError::CompilerNotFound { language: Language::V };
+        let err = CompileError::CompilerNotFound {
+            language: Language::V,
+        };
         assert!(err.to_string().contains("V"));
     }
 
