@@ -88,3 +88,45 @@ After running these examples:
 2. Check individual example READMEs for specifics
 3. Try creating your own FFI library
 4. See [docs/](../docs/) for advanced usage (when created)
+
+### 4. [demo-app](demo-app/)
+Demonstrates equilibrium compilation workflow (preprocessing).
+
+```bash
+cd demo-app
+cargo run
+```
+
+**Demonstrates:**
+- Compiling C with equilibrium
+- Analyzing compiled output
+- Understanding the workflow
+
+### 5. [full-demo](full-demo/) ⭐ **ACTUALLY WORKS**
+**Complete working example** calling C from Rust!
+
+```bash
+cd full-demo
+cargo run
+```
+
+**Output:**
+```
+=== Full Equilibrium Demo ===
+Calling C functions from Rust!
+
+Arithmetic:
+  10 + 5 = 15
+  10 - 5 = 5
+  10 * 5 = 50
+  10.0 / 5.0 = 2.00
+
+Advanced:
+  2^8 = 256
+  sqrt(144) = 12.00
+  sqrt(2) = 1.4142135624
+
+✓ All C functions called successfully!
+```
+
+**This proves equilibrium's approach works end-to-end!**

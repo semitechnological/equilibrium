@@ -207,3 +207,29 @@ Use in your project:
 ## License
 
 MIT
+
+## Working Demo
+
+See `examples/full-demo/` for a **complete working example** that:
+1. Compiles C code (`calculator.c`)
+2. Calls C functions from Rust via FFI
+3. Runs successfully with real output
+
+```bash
+cd examples/full-demo
+cargo run
+```
+
+Output:
+```
+Arithmetic:
+  10 + 5 = 15
+  10 - 5 = 5
+  10 * 5 = 50
+
+Advanced:
+  2^8 = 256
+  sqrt(144) = 12.00
+```
+
+**This demonstrates the complete polyglot FFI workflow that equilibrium enables!**
