@@ -17,6 +17,14 @@ pub enum Language {
     CSharp,
     /// Rust (for cbindgen)
     Rust,
+    /// D language
+    D,
+    /// Nim language
+    Nim,
+    /// Odin language
+    Odin,
+    /// Hare language
+    Hare,
 }
 
 /// Information about a detected language.
@@ -37,6 +45,10 @@ impl Language {
             Language::Cpp => &["cpp", "cxx", "cc", "hpp", "hxx"],
             Language::CSharp => &["cs"],
             Language::Rust => &["rs"],
+            Language::D => &["d", "di"],
+            Language::Nim => &["nim", "nims"],
+            Language::Odin => &["odin"],
+            Language::Hare => &["ha"],
         }
     }
 
@@ -49,6 +61,20 @@ impl Language {
             Language::Cpp => "clang++",
             Language::CSharp => "csc",
             Language::Rust => "rustc",
+            Language::D => "ldc2", // or dmd, gdc
+            Language::Nim => "nim",
+            Language::Odin => "odin",
+            Language::Hare => "hare",
+        }
+    }
+
+    /// Get alternative compiler names to try.
+    pub fn alternative_compilers(&self) -> &[&str] {
+        match self {
+            Language::D => &["dmd", "gdc"],
+            Language::C => &["gcc", "cc"],
+            Language::Cpp => &["g++", "c++"],
+            _ => &[],
         }
     }
 
@@ -107,7 +133,60 @@ impl Language {
                     input.to_string(),
                 ]
             }
+            Language::D => {
+                // D can emit C headers with -HC flag (LDC2)
+                vec![
+                    "-c".to_string(),
+                    "-of".to_string(),
+                    output.to_string(),
+                    "-HC".to_string(), // Generate C header
+                    input.to_string(),
+                ]
+            }
+            Language::Nim => {
+                // Nim compiles to C by default
+                vec![
+                    "c".to_string(),
+                    "--nimcache:.".to_string(),
+                    format!("-o:{output}"),
+                    input.to_string(),
+                ]
+            }
+            Language::Odin => {
+                // Odin compiles to object files
+                vec![
+                    "build".to_string(),
+                    input.to_string(),
+                    "-out:".to_string() + output,
+                    "-build-mode:obj".to_string(),
+                ]
+            }
+            Language::Hare => {
+                // Hare compiles to object files via QBE
+                vec![
+                    "build".to_string(),
+                    "-o".to_string(),
+                    output.to_string(),
+                    input.to_string(),
+                ]
+            }
         }
+    }
+
+    /// Get all supported languages.
+    pub fn all() -> &'static [Language] {
+        &[
+            Language::V,
+            Language::Zig,
+            Language::C,
+            Language::Cpp,
+            Language::CSharp,
+            Language::Rust,
+            Language::D,
+            Language::Nim,
+            Language::Odin,
+            Language::Hare,
+        ]
     }
 }
 
@@ -115,16 +194,9 @@ impl Language {
 pub fn detect_language(path: &Path) -> Option<Language> {
     let ext = path.extension()?.to_str()?.to_lowercase();
 
-    for lang in [
-        Language::V,
-        Language::Zig,
-        Language::C,
-        Language::Cpp,
-        Language::CSharp,
-        Language::Rust,
-    ] {
+    for lang in Language::all() {
         if lang.extensions().contains(&ext.as_str()) {
-            return Some(lang);
+            return Some(*lang);
         }
     }
 
@@ -135,16 +207,27 @@ pub fn detect_language(path: &Path) -> Option<Language> {
 pub fn find_compiler(language: Language) -> Option<LanguageInfo> {
     let compiler_name = language.default_compiler();
 
-    // Check if compiler exists
+    // Check primary compiler
     if which::which(compiler_name).is_ok() {
-        Some(LanguageInfo {
+        return Some(LanguageInfo {
             language,
             compiler: Some(compiler_name.to_string()),
             version: get_compiler_version(compiler_name),
-        })
-    } else {
-        None
+        });
     }
+
+    // Try alternatives
+    for alt in language.alternative_compilers() {
+        if which::which(alt).is_ok() {
+            return Some(LanguageInfo {
+                language,
+                compiler: Some((*alt).to_string()),
+                version: get_compiler_version(alt),
+            });
+        }
+    }
+
+    None
 }
 
 fn get_compiler_version(compiler: &str) -> Option<String> {
@@ -173,7 +256,7 @@ pub fn scan_directory(dir: &Path) -> Vec<(std::path::PathBuf, Language)> {
                 if path.is_dir() {
                     // Skip common non-source directories
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if !matches!(name, "target" | "node_modules" | ".git" | "build" | "dist") {
+                    if !matches!(name, "target" | "node_modules" | ".git" | "build" | "dist" | "zig-cache" | "nimcache") {
                         visit(&path, results);
                     }
                 } else if let Some(lang) = detect_language(&path) {
@@ -211,8 +294,34 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_d() {
+        assert_eq!(detect_language(Path::new("foo.d")), Some(Language::D));
+        assert_eq!(detect_language(Path::new("foo.di")), Some(Language::D));
+    }
+
+    #[test]
+    fn test_detect_nim() {
+        assert_eq!(detect_language(Path::new("foo.nim")), Some(Language::Nim));
+    }
+
+    #[test]
+    fn test_detect_odin() {
+        assert_eq!(detect_language(Path::new("foo.odin")), Some(Language::Odin));
+    }
+
+    #[test]
+    fn test_detect_hare() {
+        assert_eq!(detect_language(Path::new("foo.ha")), Some(Language::Hare));
+    }
+
+    #[test]
     fn test_detect_unknown() {
         assert_eq!(detect_language(Path::new("foo.py")), None);
         assert_eq!(detect_language(Path::new("foo.js")), None);
+    }
+
+    #[test]
+    fn test_all_languages() {
+        assert_eq!(Language::all().len(), 10);
     }
 }
