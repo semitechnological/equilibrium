@@ -1,0 +1,86 @@
+name: 'Setup Equilibrium'
+description: 'Install equilibrium and optional language compilers for polyglot FFI'
+branding:
+  icon: 'layers'
+  color: 'blue'
+
+inputs:
+  rust-version:
+    description: 'Rust toolchain version'
+    required: false
+    default: 'stable'
+  install-zig:
+    description: 'Install Zig compiler'
+    required: false
+    default: 'false'
+  install-nim:
+    description: 'Install Nim compiler'
+    required: false
+    default: 'false'
+  install-d:
+    description: 'Install D compiler (LDC)'
+    required: false
+    default: 'false'
+  cache:
+    description: 'Enable cargo caching'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.rust-version }}
+    
+    - name: Cache cargo
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-equilibrium-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install Zig
+      if: inputs.install-zig == 'true'
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.13.0
+    
+    - name: Install Nim (Ubuntu)
+      if: inputs.install-nim == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y nim
+    
+    - name: Install Nim (macOS)
+      if: inputs.install-nim == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: brew install nim
+    
+    - name: Install D compiler (Ubuntu)
+      if: inputs.install-d == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ldc
+    
+    - name: Install D compiler (macOS)
+      if: inputs.install-d == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: brew install ldc
+    
+    - name: Verify installation
+      shell: bash
+      run: |
+        echo "=== Installed Compilers ==="
+        rustc --version
+        cargo --version
+        [ "${{ inputs.install-zig }}" == "true" ] && zig version || true
+        [ "${{ inputs.install-nim }}" == "true" ] && nim --version || true
+        [ "${{ inputs.install-d }}" == "true" ] && ldc2 --version || true
+        echo "=== Ready for equilibrium ==="
