@@ -1,0 +1,13 @@
+[package]
+name = "equilibrium"
+version = "0.1.0"
+edition = "2021"
+description = "Automatic C FFI generation for C-compiling languages (V, Zig, C++, C#, Rust, D, Nim, Odin)"
+license = "MIT"
+repository = "https://github.com/semitechnological/equilibrium"
+
+[dependencies]
+which = "6"
+
+[dev-dependencies]
+tempfile = "3"
