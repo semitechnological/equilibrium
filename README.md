@@ -149,6 +149,23 @@ equilibrium = { git = "https://github.com/semitechnological/equilibrium" }
 └─────────────────┘
 ```
 
+## Helper Libraries
+
+Equilibrium provides helper libraries for each supported language to make FFI exports ergonomic:
+
+| Language | Library | Description |
+|----------|---------|-------------|
+| **Rust** | `equilibrium-rust` | `#[ffi]` proc macro for automatic `extern "C"` |
+| **Nim** | `equilibrium.nim` | Type conversion helpers and export utilities |
+| **D** | `equilibrium.d` | `@ffi` UDA and extern(C) helpers |
+| **Zig** | `equilibrium.zig` | Comptime FFI helpers and type conversions |
+
+See each library's README for usage examples:
+- [equilibrium-rust/](equilibrium-rust/)
+- [equilibrium-nim/](equilibrium-nim/)
+- [equilibrium-d/](equilibrium-d/)
+- [equilibrium-zig/](equilibrium-zig/)
+
 ## Testing
 
 ```bash
@@ -162,6 +179,21 @@ All 14 tests verify:
 - Function signature parsing
 - Error handling
 
+## CI/CD
+
+GitHub Actions are provided for both equilibrium itself and for users:
+
+- **CI for equilibrium**: `.github/workflows/ci.yml` tests on Linux/macOS/Windows
+- **Reusable action**: `.github/actions/setup-equilibrium/` for your projects
+
+Use in your project:
+```yaml
+- uses: semitechnological/equilibrium/.github/actions/setup-equilibrium@main
+  with:
+    install-zig: true
+    install-nim: true
+```
+
 ## Future Plans
 
 - [ ] Watch mode for auto-recompilation
@@ -169,6 +201,8 @@ All 14 tests verify:
 - [ ] Parallel batch compilation
 - [ ] Automatic dependency detection
 - [ ] Cross-compilation support
+- [x] Helper libraries for ergonomic FFI exports
+- [x] GitHub Actions for CI
 
 ## License
 
