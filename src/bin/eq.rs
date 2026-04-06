@@ -5,7 +5,7 @@
 //!   eq install            — interactive multi-select installer
 //!   eq install zig nim … — install specific compilers directly
 //!   eq build [ARGS…]      — cargo build with compilers on PATH
-//!   eq generate <HEADER>  — emit Rust FFI bindings from a C header
+//!   `eq generate <HEADER>`  — emit Rust FFI bindings from a C header
 
 use clap::{Parser, Subcommand};
 use console::{style, Style, Term};
@@ -268,7 +268,7 @@ fn compiler_version(path: &Path, version_args: &[&str]) -> Option<String> {
     let line = text.lines().next()?.trim();
     // Strip a leading absolute-path token some compilers (odin) emit
     let line = if line.starts_with('/') || line.starts_with(r"C:\") {
-        line.splitn(2, ' ').nth(1).unwrap_or(line).trim()
+        line.split_once(' ').map(|x| x.1).unwrap_or(line).trim()
     } else {
         line
     }

@@ -117,7 +117,7 @@ impl LibraryScanner {
                         entries
                             .filter_map(|e| e.ok())
                             .filter(|e| {
-                                e.path().extension().map_or(false, |ext| ext == "h")
+                                e.path().extension().is_some_and(|ext| ext == "h")
                                     && !self.should_exclude(&e.path())
                             })
                             .map(|e| e.path())
@@ -169,10 +169,10 @@ impl LibraryScanner {
         let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
         self.options.exclude_patterns.iter().any(|pattern| {
-            if pattern.starts_with('*') {
-                filename.ends_with(&pattern[1..])
-            } else if pattern.ends_with('*') {
-                filename.starts_with(&pattern[..pattern.len() - 1])
+            if let Some(suffix) = pattern.strip_prefix('*') {
+                filename.ends_with(suffix)
+            } else if let Some(prefix) = pattern.strip_suffix('*') {
+                filename.starts_with(prefix)
             } else {
                 filename == pattern
             }
@@ -234,7 +234,7 @@ impl LibraryScanner {
                 match generate_bindings(header, &binding_opts) {
                     Ok(binding) => {
                         // Use header filename to avoid duplicates
-                        let safe_name = header_stem.replace('-', "_").replace('.', "_");
+                        let safe_name = header_stem.replace(['-', '.'], "_");
                         let output_file = output_dir.join(format!("{}.rs", safe_name));
 
                         fs::write(&output_file, &binding.code)
