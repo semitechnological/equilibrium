@@ -28,7 +28,12 @@
 mod bindings;
 mod compiler;
 mod detector;
+mod scanner;
 
 pub use bindings::{generate_bindings, BindingOptions, GeneratedBinding};
 pub use compiler::{compile_batch, compile_to_c, CompileError, CompileResult};
 pub use detector::{detect_language, find_compiler, scan_directory, Language, LanguageInfo};
+pub use scanner::{
+    scan_c_libraries, AutoBindingOptions, GenerationResult, LibraryBindingResult,
+    LibraryDiscovery, LibraryScanner,
+};

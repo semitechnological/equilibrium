@@ -1,7 +1,7 @@
 # Nim module — bit manipulation
-# Compiled with: nim c --nimcache:. -o:nim_module nim_module.nim
+# Compiled with: nim c --nimcache:/tmp/nim_cache --noMain --app:staticlib -o:/tmp/nim_module.a nim_module.nim
 
-proc nim_popcount*(n: uint32): int32 {.exportc, cdecl.} =
+proc nim_popcount*(n: uint32): int32 {.exportc, cdecl, noSideEffect.} =
   var x = n
   var count: int32 = 0
   while x != 0:
@@ -9,10 +9,10 @@ proc nim_popcount*(n: uint32): int32 {.exportc, cdecl.} =
     x = x shr 1
   count
 
-proc nim_reverse_bits*(n: uint32): uint32 {.exportc, cdecl.} =
+proc nim_reverse_bits*(n: uint32): uint32 {.exportc, cdecl, noSideEffect.} =
   var x = n
-  var result: uint32 = 0
+  var rev: uint32 = 0
   for _ in 0..31:
-    result = (result shl 1) or (x and 1)
+    rev = (rev shl 1) or (x and 1)
     x = x shr 1
-  result
+  rev

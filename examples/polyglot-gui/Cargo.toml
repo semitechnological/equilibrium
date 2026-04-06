@@ -5,8 +5,23 @@ edition = "2021"
 
 [dependencies]
 equilibrium = { path = "../.." }
-crepuscularity-web = { git = "https://github.com/semitechnological/crepuscularity" }
-crepuscularity-core = { git = "https://github.com/semitechnological/crepuscularity" }
+# GPUI: uses Direct3D 11 on Windows, Wayland/X11 on Linux, Metal on macOS
+# Build natively on Windows: cargo build --release (needs VS Build Tools)
+# Build on Linux: cargo build --release (needs mesa-vulkan-drivers)
+gpui = "0.2.2"
+which = "6"
+
+# TUI fallback for environments without GPU (e.g. WSL2 without Vulkan)
+ratatui = "0.29"
+crossterm = "0.28"
+
+[[bin]]
+name = "polyglot-gui"
+path = "src/main.rs"
+
+[[bin]]
+name = "polyglot-tui"
+path = "src/tui.rs"
 
 [build-dependencies]
 cc = "1"

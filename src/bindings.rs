@@ -59,10 +59,10 @@ pub fn generate_bindings(
     // Parse and generate bindings
     let parsed = parse_c_header(&content);
 
-    // Generate type definitions
-    for typedef in &parsed.typedefs {
-        if should_include(&typedef.name, &options.allowlist_types) {
-            code.push_str(&generate_typedef(typedef, options));
+    // Generate enum definitions
+    for enum_def in &parsed.enums {
+        if should_include(&enum_def.name, &options.allowlist_types) {
+            code.push_str(&generate_enum(enum_def, options));
             code.push('\n');
         }
     }
@@ -72,6 +72,19 @@ pub fn generate_bindings(
         if should_include(&struct_def.name, &options.allowlist_types) {
             code.push_str(&generate_struct(struct_def, options));
             code.push('\n');
+        }
+    }
+
+    // Generate type definitions (but skip typedef struct/enum aliases since we already have them)
+    for typedef in &parsed.typedefs {
+        if should_include(&typedef.name, &options.allowlist_types) {
+            // Skip if this is just an alias to a struct/enum we already generated
+            let is_struct_alias = typedef.target.starts_with("struct ") && parsed.structs.iter().any(|s| format!("struct {}", s.name) == typedef.target);
+            let is_enum_alias = typedef.target.starts_with("enum ") && parsed.enums.iter().any(|e| format!("enum {}", e.name) == typedef.target);
+            if !is_struct_alias && !is_enum_alias {
+                code.push_str(&generate_typedef(typedef, options));
+                code.push('\n');
+            }
         }
     }
 
@@ -104,6 +117,7 @@ fn should_include(name: &str, allowlist: &[String]) -> bool {
 struct ParsedHeader {
     typedefs: Vec<TypedefDef>,
     structs: Vec<StructDef>,
+    enums: Vec<EnumDef>,
     functions: Vec<FunctionDef>,
 }
 
@@ -117,6 +131,11 @@ struct StructDef {
     fields: Vec<(String, String)>,
 }
 
+struct EnumDef {
+    name: String,
+    variants: Vec<(String, Option<String>)>, // (name, optional value)
+}
+
 struct FunctionDef {
     name: String,
     return_type: String,
@@ -125,22 +144,71 @@ struct FunctionDef {
 
 fn parse_c_header(content: &str) -> ParsedHeader {
     let mut typedefs = Vec::new();
-    let structs = Vec::new();
+    let mut structs = Vec::new();
+    let mut enums = Vec::new();
     let mut functions = Vec::new();
 
-    for line in content.lines() {
-        let line = line.trim();
+    let mut i = 0;
+    let lines: Vec<&str> = content.lines().collect();
+
+    while i < lines.len() {
+        let line = lines[i].trim();
 
         // Simple typedef detection
-        if line.starts_with("typedef") && line.ends_with(';') {
-            if let Some((target, name)) = parse_typedef_line(line) {
-                typedefs.push(TypedefDef { name, target });
+        if line.starts_with("typedef") {
+            // Check if it's a typedef enum
+            if line.contains("enum") && line.contains('{') {
+                // Multi-line typedef enum
+                let mut enum_content = String::new();
+                while i < lines.len() && !lines[i].contains('}') {
+                    enum_content.push_str(lines[i]);
+                    enum_content.push(' ');
+                    i += 1;
+                }
+                if i < lines.len() {
+                    enum_content.push_str(lines[i]);
+                }
+                // Parse typedef enum
+                if let Some(parsed) = parse_typedef_enum(&enum_content) {
+                    typedefs.push(TypedefDef {
+                        name: parsed.name.clone(),
+                        target: format!("enum {}", parsed.name),
+                    });
+                    enums.push(parsed);
+                }
+            } else if line.contains("struct") && line.contains('{') {
+                // Multi-line typedef struct
+                let mut struct_content = String::new();
+                while i < lines.len() && !lines[i].contains('}') {
+                    struct_content.push_str(lines[i]);
+                    struct_content.push(' ');
+                    i += 1;
+                }
+                if i < lines.len() {
+                    struct_content.push_str(lines[i]);
+                }
+                // Parse typedef struct
+                if let Some(parsed) = parse_typedef_struct(&struct_content) {
+                    typedefs.push(TypedefDef {
+                        name: parsed.name.clone(),
+                        target: format!("struct {}", parsed.name),
+                    });
+                    structs.push(parsed);
+                }
+            } else if line.ends_with(';') {
+                // Simple typedef
+                if let Some((target, name)) = parse_typedef_line(line) {
+                    typedefs.push(TypedefDef { name, target });
+                }
             }
         }
 
         // Simple function declaration detection
         if !line.starts_with("typedef")
             && !line.starts_with("struct")
+            && !line.starts_with("enum")
+            && !line.starts_with("//")
+            && !line.starts_with("#")
             && line.contains('(')
             && line.ends_with(';')
         {
@@ -149,14 +217,79 @@ fn parse_c_header(content: &str) -> ParsedHeader {
             }
         }
 
-        // Note: struct parsing is more complex, skipping for basic impl
+        i += 1;
     }
 
     ParsedHeader {
         typedefs,
         structs,
+        enums,
         functions,
     }
+}
+
+fn parse_typedef_struct(content: &str) -> Option<StructDef> {
+    // typedef struct { ... } name;
+    let content = content.trim();
+    
+    // Extract struct name from end: } NAME;
+    let end_part = content.strip_suffix(';')?.trim();
+    let name = end_part.split_whitespace().last()?.to_string();
+    
+    // Extract fields between { and }
+    let start = content.find('{')?;
+    let end = content.rfind('}')?;
+    let fields_str = &content[start + 1..end];
+    
+    let mut fields = Vec::new();
+    // Split by semicolons, not lines (fields end with ;)
+    for field in fields_str.split(';') {
+        let field = field.trim();
+        if field.is_empty() || field.starts_with("//") {
+            continue;
+        }
+        
+        // Parse "type name" or "type name[size]"
+        // Handle "uint32_t Pin" or "char* name"
+        let parts: Vec<&str> = field.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let field_name = parts.last().unwrap().trim_end_matches('[').to_string();
+            let field_type = parts[..parts.len() - 1].join(" ");
+            fields.push((field_type, field_name));
+        }
+    }
+    
+    Some(StructDef { name, fields })
+}
+
+fn parse_typedef_enum(content: &str) -> Option<EnumDef> {
+    // typedef enum { VAR1 = 0, VAR2 = 1 } name;
+    let content = content.trim();
+    
+    // Extract enum name from end: } NAME;
+    let end_part = content.strip_suffix(';')?.trim();
+    let name = end_part.split_whitespace().last()?.to_string();
+    
+    // Extract variants between { and }
+    let start = content.find('{')?;
+    let end = content.rfind('}')?;
+    let variants_str = &content[start + 1..end];
+    
+    let mut variants = Vec::new();
+    for item in variants_str.split(',') {
+        let item = item.trim();
+        if item.is_empty() || item.starts_with("//") {
+            continue;
+        }
+        
+        if let Some((name, value)) = item.split_once('=') {
+            variants.push((name.trim().to_string(), Some(value.trim().to_string())));
+        } else {
+            variants.push((item.to_string(), None));
+        }
+    }
+    
+    Some(EnumDef { name, variants })
 }
 
 fn parse_typedef_line(line: &str) -> Option<(String, String)> {
@@ -228,6 +361,25 @@ fn generate_typedef(typedef: &TypedefDef, _options: &BindingOptions) -> String {
     format!("pub type {} = {};\n", typedef.name, rust_type)
 }
 
+fn generate_enum(enum_def: &EnumDef, _options: &BindingOptions) -> String {
+    let mut code = String::new();
+    
+    code.push_str("#[repr(C)]\n");
+    code.push_str("#[derive(Debug, Copy, Clone, PartialEq, Eq)]\n");
+    code.push_str(&format!("pub enum {} {{\n", enum_def.name));
+    
+    for (variant_name, variant_value) in &enum_def.variants {
+        if let Some(value) = variant_value {
+            code.push_str(&format!("    {} = {},\n", variant_name, value));
+        } else {
+            code.push_str(&format!("    {},\n", variant_name));
+        }
+    }
+    
+    code.push_str("}\n");
+    code
+}
+
 fn generate_struct(struct_def: &StructDef, options: &BindingOptions) -> String {
     let mut code = String::new();
 
@@ -297,6 +449,15 @@ fn c_type_to_rust(c_type: &str) -> String {
         "size_t" => "usize".to_string(),
         "ssize_t" => "isize".to_string(),
         "bool" | "_Bool" => "bool".to_string(),
+        // Standard C types from stdint.h
+        "uint8_t" => "u8".to_string(),
+        "uint16_t" => "u16".to_string(),
+        "uint32_t" => "u32".to_string(),
+        "uint64_t" => "u64".to_string(),
+        "int8_t" => "i8".to_string(),
+        "int16_t" => "i16".to_string(),
+        "int32_t" => "i32".to_string(),
+        "int64_t" => "i64".to_string(),
         s if s.ends_with('*') => {
             let inner = s.strip_suffix('*').unwrap().trim();
             if inner == "void" {

@@ -1,14 +1,21 @@
-//! Equilibrium Polyglot Dashboard
+//! Equilibrium Polyglot Calculator — GPUI desktop app (multi-mode)
 //!
-//! A GUI application (rendered via crepuscularity-web) that shows live results
-//! from foreign-language modules compiled by equilibrium. C, C++, and Zig
-//! are always linked; other language modules are shown with their compiler status.
+//! Three modes: Calculator, Sequence, Languages
+//!
+//! ## Building
+//! Windows (native, recommended):
+//!   cargo build --release
+//!
+//! Linux with Vulkan:
+//!   RUSTFLAGS="-L /tmp/gpui-libs" cargo build --bin polyglot-gui
+//!
+//! macOS:
+//!   cargo build --release
 
-use crepuscularity_core::context::{TemplateContext, TemplateValue};
-use crepuscularity_web::render_template_to_html;
-use equilibrium::{find_compiler, Language};
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+use gpui::*;
 use std::os::raw::c_int;
-use std::path::Path;
 
 // ── C FFI (always linked) ────────────────────────────────────────────────────
 #[cfg(has_c)]
@@ -22,7 +29,7 @@ mod cpp_ffi {
     include!(concat!(env!("OUT_DIR"), "/cpp_bindings.rs"));
 }
 
-// ── Zig FFI (linked when zig compiler was found at build time) ───────────────
+// ── Zig FFI (linked when zig was found at build time) ────────────────────────
 #[cfg(has_zig)]
 extern "C" {
     fn zig_square(n: c_int) -> c_int;
@@ -30,7 +37,36 @@ extern "C" {
     fn zig_is_power_of_two(n: u64) -> bool;
 }
 
-// ── Rust native (always available — host language) ───────────────────────────
+// ── Nim FFI (linked when nim was found at build time) ────────────────────────
+#[cfg(has_nim)]
+extern "C" {
+    fn nim_popcount(n: u32) -> i32;
+    fn nim_reverse_bits(n: u32) -> u32;
+}
+
+// ── V FFI (linked when v was found at build time) ────────────────────────────
+#[cfg(has_v)]
+extern "C" {
+    fn v_celsius_to_fahrenheit(c: f64) -> f64;
+    fn v_km_to_miles(km: f64) -> f64;
+}
+
+// ── D FFI (linked when ldc2 was found at build time) ─────────────────────────
+#[cfg(has_d)]
+extern "C" {
+    fn d_abs(n: i32) -> i32;
+    fn d_triangular(n: i32) -> i64;
+}
+
+// ── Odin FFI (linked when odin was found at build time) ──────────────────────
+#[cfg(has_odin)]
+extern "C" {
+    fn odin_abs(n: i32) -> i32;
+    fn odin_min(a: i32, b: i32) -> i32;
+    fn odin_max(a: i32, b: i32) -> i32;
+}
+
+// ── Rust native ───────────────────────────────────────────────────────────────
 fn rust_is_prime(n: u64) -> bool {
     if n < 2 {
         return false;
@@ -59,326 +95,601 @@ fn rust_next_prime(after: u64) -> u64 {
     n
 }
 
-// ── Language card data ────────────────────────────────────────────────────────
+#[allow(dead_code)]
+fn rust_fibonacci(n: u64) -> u64 {
+    if n == 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    let mut a = 0u64;
+    let mut b = 1u64;
+    for _ in 2..=n {
+        let c = a.saturating_add(b);
+        a = b;
+        b = c;
+    }
+    b
+}
 
-struct LangCard {
-    name: &'static str,
-    extension: &'static str,
-    source_file: &'static str,
-    fn_sig: &'static str,
-    #[allow(dead_code)] // kept for introspection / future use
-    equilibrium_lang: Language,
+#[allow(dead_code)]
+fn rust_factorial(n: u64) -> u64 {
+    (1..=n).fold(1u64, |acc, x| acc.saturating_mul(x))
+}
+
+// ── App state ─────────────────────────────────────────────────────────────────
+#[derive(Clone, PartialEq)]
+enum Mode {
+    Calculator,
+    Sequence,
+    Languages,
+}
+
+struct PolyglotCalc {
+    n: i32,
+    mode: Mode,
+}
+
+impl PolyglotCalc {
+    fn new(_cx: &mut Context<Self>) -> Self {
+        Self {
+            n: 7,
+            mode: Mode::Calculator,
+        }
+    }
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+
+fn result_row(lang: &'static str, linked: bool, text: String) -> impl IntoElement {
+    let tag_col = if linked {
+        rgb(0x4ade80u32)
+    } else {
+        rgb(0x52525bu32)
+    };
+    let txt_col = if linked {
+        rgb(0xa1a1aau32)
+    } else {
+        rgb(0x3f3f46u32)
+    };
+
+    div()
+        .flex()
+        .gap(px(12.))
+        .py(px(8.))
+        .child(
+            div()
+                .w(px(56.))
+                .flex_shrink_0()
+                .text_color(tag_col)
+                .text_size(rems(0.75))
+                .font_weight(FontWeight::BOLD)
+                .child(lang),
+        )
+        .child(
+            div()
+                .flex_1()
+                .text_color(txt_col)
+                .text_size(rems(0.8))
+                .child(SharedString::from(text)),
+        )
+}
+
+fn tab_button(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .cursor_pointer()
+        .px(px(16.))
+        .py(px(8.))
+        .rounded(px(6.))
+        .bg(if active {
+            rgb(0x3f3f46u32)
+        } else {
+            rgb(0x27272au32)
+        })
+        .text_color(if active {
+            rgb(0xfafafau32)
+        } else {
+            rgb(0x71717au32)
+        })
+        .text_size(rems(0.875))
+        .font_weight(if active {
+            FontWeight::BOLD
+        } else {
+            FontWeight::NORMAL
+        })
+        .on_click(on_click)
+        .child(label)
+}
+
+fn seq_cell(text: String, header: bool) -> impl IntoElement {
+    div()
+        .w(px(100.))
+        .flex_shrink_0()
+        .px(px(8.))
+        .py(px(6.))
+        .text_color(if header {
+            rgb(0x4ade80u32)
+        } else {
+            rgb(0xa1a1aau32)
+        })
+        .text_size(rems(0.8))
+        .font_weight(if header {
+            FontWeight::BOLD
+        } else {
+            FontWeight::NORMAL
+        })
+        .child(SharedString::from(text))
+}
+
+fn lang_card(
+    lang: &'static str,
+    compiler: &'static str,
     linked: bool,
     compiler_found: bool,
-    compiler_info: String,
-    result: String,
-    reason: &'static str,
+) -> impl IntoElement {
+    let dot_color = if linked {
+        rgb(0x4ade80u32) // green
+    } else if compiler_found {
+        rgb(0xfbbf24u32) // yellow
+    } else {
+        rgb(0x52525bu32) // grey
+    };
+    let status = if linked {
+        "linked"
+    } else if compiler_found {
+        "found"
+    } else {
+        "absent"
+    };
+
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .px(px(14.))
+        .py(px(10.))
+        .rounded(px(6.))
+        .bg(rgb(0x18181bu32))
+        // dot
+        .child(
+            div()
+                .w(px(8.))
+                .h(px(8.))
+                .rounded_full()
+                .flex_shrink_0()
+                .bg(dot_color),
+        )
+        // lang name
+        .child(
+            div()
+                .w(px(64.))
+                .flex_shrink_0()
+                .text_color(rgb(0xfafafau32))
+                .text_size(rems(0.875))
+                .font_weight(FontWeight::BOLD)
+                .child(lang),
+        )
+        // compiler
+        .child(
+            div()
+                .w(px(80.))
+                .flex_shrink_0()
+                .text_color(rgb(0x71717au32))
+                .text_size(rems(0.75))
+                .child(compiler),
+        )
+        // status
+        .child(
+            div()
+                .text_color(dot_color)
+                .text_size(rems(0.75))
+                .child(status),
+        )
 }
 
-fn lang_card(lang: Language) -> (bool, String) {
-    match find_compiler(lang) {
-        Some(info) => {
-            let name = info.compiler.as_deref().unwrap_or("?");
-            let ver = info.version.as_deref().unwrap_or("");
-            (true, format!("{name} · {ver}"))
-        }
-        None => (false, "compiler not found".to_string()),
+// ── Render ────────────────────────────────────────────────────────────────────
+impl Render for PolyglotCalc {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let n = self.n.max(0);
+
+        // ── Tab bar ──────────────────────────────────────────────────────────
+        let tab_bar = div()
+            .flex()
+            .gap(px(8.))
+            .child(tab_button(
+                "tab-calc",
+                "Calculator",
+                self.mode == Mode::Calculator,
+                cx.listener(|this, _, _, cx| {
+                    this.mode = Mode::Calculator;
+                    cx.notify();
+                }),
+            ))
+            .child(tab_button(
+                "tab-seq",
+                "Sequence",
+                self.mode == Mode::Sequence,
+                cx.listener(|this, _, _, cx| {
+                    this.mode = Mode::Sequence;
+                    cx.notify();
+                }),
+            ))
+            .child(tab_button(
+                "tab-lang",
+                "Languages",
+                self.mode == Mode::Languages,
+                cx.listener(|this, _, _, cx| {
+                    this.mode = Mode::Languages;
+                    cx.notify();
+                }),
+            ));
+
+        // ── Mode content ─────────────────────────────────────────────────────
+        let content: AnyElement = match self.mode {
+            Mode::Calculator => self.render_calculator(n, cx).into_any_element(),
+            Mode::Sequence => self.render_sequence().into_any_element(),
+            Mode::Languages => self.render_languages().into_any_element(),
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(rgb(0x09090bu32))
+            .p(px(24.))
+            .gap(px(16.))
+            // ── Title
+            .child(
+                div()
+                    .text_color(rgb(0xfafafau32))
+                    .text_size(rems(1.2))
+                    .font_weight(FontWeight::BOLD)
+                    .child("Equilibrium · Polyglot Dashboard"),
+            )
+            // ── Tabs
+            .child(tab_bar)
+            // ── Content
+            .child(content)
+            // ── Footer
+            .child(
+                div()
+                    .text_color(rgb(0x3f3f46u32))
+                    .text_size(rems(0.7))
+                    .child("Built with equilibrium (auto-generated FFI) + GPUI"),
+            )
     }
 }
 
-fn build_cards() -> Vec<LangCard> {
-    // ── C ───────────────────────────────────────────────────────────────────
-    let (c_found, c_info) = lang_card(Language::C);
-    #[cfg(has_c)]
-    let c_result = unsafe {
-        format!(
-            "c_add(21, 21) = {}   |   c_gcd(48, 18) = {}   |   c_fibonacci(10) = {}",
-            c_ffi::c_add(21, 21),
-            c_ffi::c_gcd(48, 18),
-            c_ffi::c_fibonacci(10)
-        )
-    };
-    #[cfg(not(has_c))]
-    let c_result = String::from("(not linked)");
+impl PolyglotCalc {
+    fn render_calculator(&self, n: i32, cx: &mut Context<Self>) -> impl IntoElement {
+        // ── Live FFI calls ────────────────────────────────────────────────────
+        #[cfg(has_c)]
+        let c_text = unsafe {
+            format!(
+                "c_add({n},{n}) = {}   c_gcd({n},{}) = {}   c_fibonacci({n}) = {}",
+                c_ffi::c_add(n, n),
+                n + 1,
+                c_ffi::c_gcd(n, n + 1),
+                c_ffi::c_fibonacci(n),
+            )
+        };
+        #[cfg(not(has_c))]
+        let c_text = String::from("not linked — C compiler absent at build time");
 
-    // ── C++ ─────────────────────────────────────────────────────────────────
-    let (cpp_found, cpp_info) = lang_card(Language::Cpp);
-    #[cfg(has_cpp)]
-    let cpp_result = unsafe {
-        format!(
-            "cpp_factorial(10) = {}   |   cpp_is_prime(97) = {}   |   cpp_strlen(\"equilibrium\") = {}",
-            cpp_ffi::cpp_factorial(10),
-            cpp_ffi::cpp_is_prime(97),
-            cpp_ffi::cpp_strlen(b"equilibrium\0".as_ptr() as *const std::os::raw::c_char)
-        )
-    };
-    #[cfg(not(has_cpp))]
-    let cpp_result = String::from("(not linked)");
+        #[cfg(has_cpp)]
+        let cpp_text = unsafe {
+            let safe = n.min(20);
+            format!(
+                "cpp_factorial({safe}) = {}   cpp_is_prime({n}) = {}",
+                cpp_ffi::cpp_factorial(safe),
+                cpp_ffi::cpp_is_prime(n) != 0,
+            )
+        };
+        #[cfg(not(has_cpp))]
+        let cpp_text = String::from("not linked — C++ compiler absent at build time");
 
-    // ── Zig ─────────────────────────────────────────────────────────────────
-    let (zig_found, zig_info) = lang_card(Language::Zig);
-    #[cfg(has_zig)]
-    let zig_result = unsafe {
-        format!(
-            "zig_square(12) = {}   |   zig_sum_1_to_n(100) = {}   |   zig_is_power_of_two(64) = {}",
-            zig_square(12),
-            zig_sum_1_to_n(100),
-            zig_is_power_of_two(64),
-        )
-    };
-    #[cfg(not(has_zig))]
-    let zig_result = String::from("(not linked)");
+        #[cfg(has_zig)]
+        let zig_text = unsafe {
+            format!(
+                "zig_square({n}) = {}   zig_sum_1_to_{n} = {}   zig_is_power_of_two({n}) = {}",
+                zig_square(n),
+                zig_sum_1_to_n(n as i64),
+                zig_is_power_of_two(n as u64),
+            )
+        };
+        #[cfg(not(has_zig))]
+        let zig_text = String::from("not linked — zig absent at build time");
 
-    // ── V ───────────────────────────────────────────────────────────────────
-    let (v_found, v_info) = lang_card(Language::V);
+        #[cfg(has_nim)]
+        let nim_text = unsafe {
+            format!(
+                "nim_popcount({n}) = {}   nim_reverse_bits({:#010x}) = {:#010x}",
+                nim_popcount(n as u32),
+                n as u32,
+                nim_reverse_bits(n as u32),
+            )
+        };
+        #[cfg(not(has_nim))]
+        let nim_text = String::from("not linked — nim absent at build time");
 
-    // ── Rust (native) ────────────────────────────────────────────────────────
-    let rust_result = format!(
-        "rust_is_prime(97) = {}   |   rust_next_prime(100) = {}",
-        rust_is_prime(97),
-        rust_next_prime(100),
-    );
+        #[cfg(has_v)]
+        let v_text = unsafe {
+            format!(
+                "v_celsius_to_fahrenheit({n}°C) = {:.1}°F   v_km_to_miles({n}km) = {:.2}mi",
+                v_celsius_to_fahrenheit(n as f64),
+                v_km_to_miles(n as f64),
+            )
+        };
+        #[cfg(not(has_v))]
+        let v_text = String::from("not linked — v absent at build time");
 
-    // ── D ───────────────────────────────────────────────────────────────────
-    let (d_found, d_info) = lang_card(Language::D);
+        #[cfg(has_d)]
+        let d_text = unsafe {
+            format!(
+                "d_abs(-{n}) = {}   d_triangular({n}) = {}",
+                d_abs(-n),
+                d_triangular(n),
+            )
+        };
+        #[cfg(not(has_d))]
+        let d_text = String::from("not linked — ldc2 absent at build time");
 
-    // ── Nim ─────────────────────────────────────────────────────────────────
-    let (nim_found, nim_info) = lang_card(Language::Nim);
+        #[cfg(has_odin)]
+        let odin_text = unsafe {
+            format!(
+                "odin_abs(-{n}) = {}   odin_min({n},{}) = {}   odin_max({n},{}) = {}",
+                odin_abs(-n),
+                n + 3,
+                odin_min(n, n + 3),
+                n + 3,
+                odin_max(n, n + 3),
+            )
+        };
+        #[cfg(not(has_odin))]
+        let odin_text = String::from("not linked — odin absent at build time");
 
-    // ── Odin ────────────────────────────────────────────────────────────────
-    let (odin_found, odin_info) = lang_card(Language::Odin);
+        let rs_text = format!(
+            "rust_is_prime({n}) = {}   rust_next_prime({n}) = {}",
+            rust_is_prime(n as u64),
+            rust_next_prime(n as u64),
+        );
 
-    // ── Hare ────────────────────────────────────────────────────────────────
-    let (hare_found, hare_info) = lang_card(Language::Hare);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            // ── n control
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(
+                        div()
+                            .id("dec")
+                            .cursor_pointer()
+                            .px(px(20.))
+                            .py(px(10.))
+                            .rounded(px(6.))
+                            .bg(rgb(0x27272au32))
+                            .text_color(rgb(0xfafafau32))
+                            .text_size(rems(1.2))
+                            .font_weight(FontWeight::BOLD)
+                            .on_click(cx.listener(|this, _ev, _window, cx| {
+                                this.n = this.n.saturating_sub(1);
+                                cx.notify();
+                            }))
+                            .child("−"),
+                    )
+                    .child(
+                        div()
+                            .w(px(80.))
+                            .flex()
+                            .justify_center()
+                            .text_color(rgb(0xfafafau32))
+                            .text_size(rems(2.5))
+                            .font_weight(FontWeight::BOLD)
+                            .child(SharedString::from(format!("{n}"))),
+                    )
+                    .child(
+                        div()
+                            .id("inc")
+                            .cursor_pointer()
+                            .px(px(20.))
+                            .py(px(10.))
+                            .rounded(px(6.))
+                            .bg(rgb(0x27272au32))
+                            .text_color(rgb(0xfafafau32))
+                            .text_size(rems(1.2))
+                            .font_weight(FontWeight::BOLD)
+                            .on_click(cx.listener(|this, _ev, _window, cx| {
+                                this.n += 1;
+                                cx.notify();
+                            }))
+                            .child("+"),
+                    )
+                    .child(
+                        div()
+                            .id("double")
+                            .cursor_pointer()
+                            .px(px(20.))
+                            .py(px(10.))
+                            .rounded(px(6.))
+                            .bg(rgb(0x27272au32))
+                            .text_color(rgb(0xa78bfau32))
+                            .text_size(rems(1.0))
+                            .on_click(cx.listener(|this, _ev, _window, cx| {
+                                this.n = (this.n * 2).min(10000);
+                                cx.notify();
+                            }))
+                            .child("×2"),
+                    )
+                    .child(
+                        div()
+                            .id("reset")
+                            .cursor_pointer()
+                            .px(px(20.))
+                            .py(px(10.))
+                            .rounded(px(6.))
+                            .bg(rgb(0x27272au32))
+                            .text_color(rgb(0x71717au32))
+                            .text_size(rems(1.0))
+                            .on_click(cx.listener(|this, _ev, _window, cx| {
+                                this.n = 7;
+                                cx.notify();
+                            }))
+                            .child("reset"),
+                    ),
+            )
+            // ── Results panel
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(8.))
+                    .bg(rgb(0x18181bu32))
+                    .px(px(20.))
+                    .py(px(4.))
+                    .child(result_row("C", cfg!(has_c), c_text))
+                    .child(result_row("C++", cfg!(has_cpp), cpp_text))
+                    .child(result_row("Zig", cfg!(has_zig), zig_text))
+                    .child(result_row("Nim", cfg!(has_nim), nim_text))
+                    .child(result_row("V", cfg!(has_v), v_text))
+                    .child(result_row("D", cfg!(has_d), d_text))
+                    .child(result_row("Odin", cfg!(has_odin), odin_text))
+                    .child(result_row("Rust", true, rs_text)),
+            )
+    }
 
-    // ── C# ──────────────────────────────────────────────────────────────────
-    let (cs_found, cs_info) = lang_card(Language::CSharp);
+    fn render_sequence(&self) -> impl IntoElement {
+        // Header row
+        let header = div()
+            .flex()
+            .gap(px(0.))
+            .border_b_1()
+            .border_color(rgb(0x27272au32))
+            .child(seq_cell("n".to_string(), true))
+            .child(seq_cell("fib(n) [C]".to_string(), true))
+            .child(seq_cell("fact(n) [C++]".to_string(), true))
+            .child(seq_cell("n² [Zig]".to_string(), true))
+            .child(seq_cell("tri(n) [D]".to_string(), true))
+            .child(seq_cell("prime? [Rs]".to_string(), true));
 
-    vec![
-        LangCard {
-            name: "C",
-            extension: ".c / .h",
-            source_file: "foreign-code/c_module.c",
-            fn_sig: "int c_add(int, int)  |  int c_gcd(int, int)  |  long c_fibonacci(int)",
-            equilibrium_lang: Language::C,
-            linked: cfg!(has_c),
-            compiler_found: c_found,
-            compiler_info: c_info,
-            result: c_result,
-            reason: "C compiler not found — install clang or gcc",
-        },
-        LangCard {
-            name: "C++",
-            extension: ".cpp / .hpp",
-            source_file: "foreign-code/cpp_module.cpp",
-            fn_sig:
-                "long long cpp_factorial(int)  |  int cpp_is_prime(int)  |  int cpp_strlen(char*)",
-            equilibrium_lang: Language::Cpp,
-            linked: cfg!(has_cpp),
-            compiler_found: cpp_found,
-            compiler_info: cpp_info,
-            result: cpp_result,
-            reason: "C++ compiler not found — install clang++ or g++",
-        },
-        LangCard {
-            name: "Zig",
-            extension: ".zig",
-            source_file: "foreign-code/zig_module.zig",
-            fn_sig:
-                "zig_square(i32) i32  |  zig_sum_1_to_n(i64) i64  |  zig_is_power_of_two(u64) bool",
-            equilibrium_lang: Language::Zig,
-            linked: cfg!(has_zig),
-            compiler_found: zig_found,
-            compiler_info: zig_info,
-            result: zig_result,
-            reason: "zig not found — install from ziglang.org",
-        },
-        LangCard {
-            name: "V (Vlang)",
-            extension: ".v",
-            source_file: "foreign-code/v_module.v",
-            fn_sig: "celsius_to_fahrenheit(f64) f64  |  km_to_miles(f64) f64",
-            equilibrium_lang: Language::V,
-            linked: false,
-            compiler_found: v_found,
-            compiler_info: v_info,
-            result: String::new(),
-            reason: "v compiler not found — install from vlang.io",
-        },
-        LangCard {
-            name: "Rust",
-            extension: ".rs",
-            source_file: "foreign-code/rust_module.rs",
-            fn_sig: "rust_is_prime(u64) bool  |  rust_next_prime(u64) u64",
-            equilibrium_lang: Language::Rust,
-            linked: true,
-            compiler_found: true,
-            compiler_info: format!(
-                "rustc · {}",
-                find_compiler(Language::Rust)
-                    .and_then(|i| i.version)
-                    .unwrap_or_default()
-            ),
-            result: rust_result,
-            reason: "",
-        },
-        LangCard {
-            name: "D",
-            extension: ".d / .di",
-            source_file: "foreign-code/d_module.d",
-            fn_sig: "d_abs(int) int  |  d_clamp(int, int, int) int  |  d_triangular(int) long",
-            equilibrium_lang: Language::D,
-            linked: false,
-            compiler_found: d_found,
-            compiler_info: d_info,
-            result: String::new(),
-            reason: "D compiler not found — install ldc2, dmd, or gdc",
-        },
-        LangCard {
-            name: "Nim",
-            extension: ".nim",
-            source_file: "foreign-code/nim_module.nim",
-            fn_sig: "nim_popcount(uint32) int32  |  nim_reverse_bits(uint32) uint32",
-            equilibrium_lang: Language::Nim,
-            linked: false,
-            compiler_found: nim_found,
-            compiler_info: nim_info,
-            result: String::new(),
-            reason: "nim not found — install from nim-lang.org",
-        },
-        LangCard {
-            name: "Odin",
-            extension: ".odin",
-            source_file: "foreign-code/odin_module.odin",
-            fn_sig: "odin_max(i32, i32) i32  |  odin_min(i32, i32) i32  |  odin_abs(i32) i32",
-            equilibrium_lang: Language::Odin,
-            linked: false,
-            compiler_found: odin_found,
-            compiler_info: odin_info,
-            result: String::new(),
-            reason: "odin not found — install from odin-lang.org",
-        },
-        LangCard {
-            name: "Hare",
-            extension: ".ha",
-            source_file: "foreign-code/hare_module.ha",
-            fn_sig: "hare_sign(i32) i32  |  hare_div_safe(i32, i32) i32",
-            equilibrium_lang: Language::Hare,
-            linked: false,
-            compiler_found: hare_found,
-            compiler_info: hare_info,
-            result: String::new(),
-            reason: "hare not found — install from harelang.org",
-        },
-        LangCard {
-            name: "C#",
-            extension: ".cs",
-            source_file: "foreign-code/csharp_module.cs",
-            fn_sig: "cs_circle_area_x100(int) int  |  cs_hypotenuse_x100(int, int) int",
-            equilibrium_lang: Language::CSharp,
-            linked: false,
-            compiler_found: cs_found,
-            compiler_info: cs_info,
-            result: String::new(),
-            reason: "C# compiler not found — install dotnet SDK",
-        },
-    ]
+        let mut rows = div().flex().flex_col().gap(px(2.));
+        for i in 1i32..=8 {
+            #[cfg(has_c)]
+            let fib = unsafe { format!("{}", c_ffi::c_fibonacci(i)) };
+            #[cfg(not(has_c))]
+            let fib = "—".to_string();
+
+            #[cfg(has_cpp)]
+            let fact = unsafe { format!("{}", cpp_ffi::cpp_factorial(i.min(20))) };
+            #[cfg(not(has_cpp))]
+            let fact = "—".to_string();
+
+            #[cfg(has_zig)]
+            let sq = unsafe { format!("{}", zig_square(i)) };
+            #[cfg(not(has_zig))]
+            let sq = format!("{}", i * i);
+
+            #[cfg(has_d)]
+            let tri = unsafe { format!("{}", d_triangular(i)) };
+            #[cfg(not(has_d))]
+            let tri = format!("{}", (i as i64) * (i as i64 + 1) / 2);
+
+            let prime = if rust_is_prime(i as u64) { "yes" } else { "no" };
+
+            let row = div()
+                .flex()
+                .gap(px(0.))
+                .rounded(px(4.))
+                .bg(if i % 2 == 0 {
+                    rgb(0x18181bu32)
+                } else {
+                    rgb(0x09090bu32)
+                })
+                .child(seq_cell(format!("{i}"), false))
+                .child(seq_cell(fib, false))
+                .child(seq_cell(fact, false))
+                .child(seq_cell(sq, false))
+                .child(seq_cell(tri, false))
+                .child(seq_cell(prime.to_string(), false));
+            rows = rows.child(row);
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .child(
+                div()
+                    .text_color(rgb(0x71717au32))
+                    .text_size(rems(0.8))
+                    .child("n = 1..8: fibonacci (C), factorial (C++), square (Zig), triangular (D), prime (Rust)"),
+            )
+            .child(header)
+            .child(rows)
+    }
+
+    fn render_languages(&self) -> impl IntoElement {
+        // Check which compilers are available at runtime for display
+        let zig_found = which::which("zig").is_ok();
+        let nim_found = which::which("nim").is_ok();
+        let v_found = which::which("v").is_ok();
+        let d_found = which::which("ldc2").is_ok();
+        let odin_found =
+            which::which("odin").is_ok() || std::path::Path::new("/usr/local/odin/odin").exists();
+        let cs_found = which::which("dotnet").is_ok();
+        let hare_found = which::which("hare").is_ok();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_color(rgb(0x71717au32))
+                    .text_size(rems(0.8))
+                    .child("Green = linked via FFI   Yellow = compiler found   Grey = absent"),
+            )
+            .child(lang_card("C", "gcc", cfg!(has_c), true))
+            .child(lang_card("C++", "g++", cfg!(has_cpp), true))
+            .child(lang_card("Zig", "zig", cfg!(has_zig), zig_found))
+            .child(lang_card("Nim", "nim", cfg!(has_nim), nim_found))
+            .child(lang_card("V", "v", cfg!(has_v), v_found))
+            .child(lang_card("D", "ldc2", cfg!(has_d), d_found))
+            .child(lang_card("Odin", "odin", cfg!(has_odin), odin_found))
+            .child(lang_card("C#", "dotnet", false, cs_found))
+            .child(lang_card("Hare", "hare", false, hare_found))
+            .child(lang_card("Rust", "rustc", true, true))
+    }
 }
 
+// ── Entry point ───────────────────────────────────────────────────────────────
 fn main() {
-    let cards = build_cards();
-
-    let linked_count = cards.iter().filter(|c| c.linked).count();
-    let found_count = cards.iter().filter(|c| c.compiler_found).count();
-
-    // ── Build crepuscularity template context ─────────────────────────────
-    let mut ctx = TemplateContext::new();
-    ctx.set("total_languages", TemplateValue::Int(cards.len() as i64));
-    ctx.set("compilers_found", TemplateValue::Int(found_count as i64));
-    ctx.set("modules_linked", TemplateValue::Int(linked_count as i64));
-
-    let lang_list: Vec<TemplateContext> = cards
-        .iter()
-        .map(|card| {
-            let mut lctx = TemplateContext::new();
-            lctx.set("name", TemplateValue::Str(card.name.to_string()));
-            lctx.set("extension", TemplateValue::Str(card.extension.to_string()));
-            lctx.set(
-                "source_file",
-                TemplateValue::Str(card.source_file.to_string()),
-            );
-            lctx.set("fn_sig", TemplateValue::Str(card.fn_sig.to_string()));
-            lctx.set("linked", TemplateValue::Bool(card.linked));
-            lctx.set("compiler_found", TemplateValue::Bool(card.compiler_found));
-            lctx.set(
-                "compiler_info",
-                TemplateValue::Str(card.compiler_info.clone()),
-            );
-            lctx.set("result", TemplateValue::Str(card.result.clone()));
-            lctx.set("reason", TemplateValue::Str(card.reason.to_string()));
-            lctx
-        })
-        .collect();
-
-    ctx.set("languages", TemplateValue::List(lang_list));
-
-    // ── Render template ───────────────────────────────────────────────────
-    let template_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/dashboard.crepus");
-    let template_src = std::fs::read_to_string(&template_path)
-        .unwrap_or_else(|e| panic!("failed to read template: {e}"));
-
-    let html_body = render_template_to_html(&template_src, &ctx)
-        .unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"));
-
-    let full_html = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Equilibrium · Polyglot Dashboard</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body {{ background: #09090b; color: #fafafa; font-family: 'JetBrains Mono', 'Fira Code', monospace; }}
-  </style>
-</head>
-<body>
-{html_body}
-</body>
-</html>"#
-    );
-
-    // ── Write output ───────────────────────────────────────────────────────
-    let out_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("dashboard.html");
-    std::fs::write(&out_path, &full_html).expect("failed to write dashboard.html");
-
-    println!("Dashboard written to: {}", out_path.display());
-    println!(
-        "Languages: {} total  |  {} compilers found  |  {} modules linked",
-        cards.len(),
-        found_count,
-        linked_count
-    );
-
-    // Print live call results for linked modules
-    println!("\n── Live FFI results ──────────────────────────────────────────");
-    for card in &cards {
-        if card.linked && !card.result.is_empty() {
-            println!("[{}]  {}", card.name, card.result);
-        } else if card.compiler_found {
-            println!(
-                "[{}]  compiler found but not linked in this build",
-                card.name
-            );
-        } else {
-            println!("[{}]  {}", card.name, card.reason);
-        }
-    }
-
-    println!("\nOpen dashboard.html in your browser to view the GUI.");
-
-    // Try to open in browser automatically (best-effort)
-    let _ = std::process::Command::new("xdg-open")
-        .arg(out_path.to_str().unwrap())
-        .spawn();
+    Application::new().run(|cx: &mut App| {
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                    origin: point(px(200.), px(150.)),
+                    size: size(px(860.), px(600.)),
+                })),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(SharedString::from("Equilibrium · Polyglot Dashboard")),
+                    appears_transparent: false,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            |_window, cx| cx.new(PolyglotCalc::new),
+        )
+        .unwrap();
+    });
 }

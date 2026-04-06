@@ -5,9 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Build
+# Build library
 cargo build
 cargo build --release
+
+# Build eq CLI
+cargo build --bin eq --features cli --release
 
 # Test
 cargo test
@@ -23,6 +26,11 @@ cargo doc --all-features --no-deps
 
 # Run example
 cargo run --example using_equilibrium
+
+# Polyglot demo (TUI works everywhere; GUI needs GPU)
+cd examples/polyglot-gui
+cargo build --bin polyglot-tui
+cargo build --bin polyglot-gui
 ```
 
 ## Architecture
@@ -37,6 +45,15 @@ Equilibrium is a Rust library that auto-generates C FFI bindings for foreign-lan
 
 `src/lib.rs` re-exports the public surface: `detect_language`, `compile_to_c`, `generate_bindings`, `find_compiler`.
 
+### `eq` CLI (`src/bin/eq.rs`)
+
+The `eq` binary (feature-gated behind `cli`) provides four subcommands:
+
+- `eq check` — detects all supported compilers and shows versions/paths
+- `eq install [names…]` — installs missing compilers via the best available package manager; multiple compilers install in parallel. Install order: **wax → brew/linuxbrew → apt/dnf/pacman** on Linux/macOS, **wax → winget → scoop** on Windows.
+- `eq build [args…]` — runs `cargo build` with all known compiler bin dirs prepended to PATH (linuxbrew, homebrew, `/usr/local/sbin`, etc.)
+- `eq generate <header> [-o file]` — emits Rust `extern "C"` bindings from a C header via `equilibrium::generate_bindings`
+
 ### Helper Libraries
 
 Language-specific ergonomic crates live in sibling directories:
@@ -50,8 +67,20 @@ Language-specific ergonomic crates live in sibling directories:
 - `examples/using_equilibrium.rs` — demonstrates all three pipeline stages (detect, compile, generate bindings, scan_directory)
 - `examples/demo-app/` — minimal end-to-end demo: `build.rs` compiles `math.c` via `cc` and generates bindings with equilibrium; `main.rs` calls C functions through the generated `include!()`d bindings
 - `examples/full-demo/` — full demo calling a C calculator library from Rust
-- `examples/polyglot-gui/` — polyglot dashboard app with one foreign-language module per supported language (C, C++, Zig, V, D, Nim, Odin, Hare, C#, Rust); `build.rs` compiles C/C++/Zig at build time and sets `cfg(has_c/has_cpp/has_zig)`; the app calls linked FFI functions and renders an HTML dashboard via [crepuscularity-web](https://github.com/semitechnological/crepuscularity)
+- `examples/polyglot-gui/` — interactive polyglot dashboard with a ratatui TUI (`polyglot-tui`) and a GPUI GUI (`polyglot-gui`). Calls live FFI into C, C++, Zig, Nim, V, D, Odin, and Rust. `build.rs` uses `find_bin()` with hardcoded linuxbrew fallbacks so compilers are found regardless of the shell PATH that cargo inherits.
 
 ### Zig FFI notes
 
 Zig objects must be compiled with `-fPIC -OReleaseFast` to link cleanly into Rust's PIE binary. `ReleaseFast` removes safety checks that otherwise pull in Zig's stdlib panic infrastructure, which conflicts with the linker. See `examples/polyglot-gui/build.rs`.
+
+### V FFI on Linux
+
+V's runtime cannot link directly into Rust's PIE binary. The polyglot-gui uses a C shim (`v_module_shim.c`) that implements the same exported symbols with identical semantics.
+
+### Windows build notes
+
+The `polyglot-gui` binary targets D3D11 (no Vulkan needed). Build from Windows PowerShell:
+```powershell
+cargo build --release --bin polyglot-gui
+```
+The TUI binary works cross-platform. The `eq` CLI on Windows uses `%TEMP%` as the working directory when invoking winget/scoop to avoid UNC path errors from WSL2 filesystem paths.
