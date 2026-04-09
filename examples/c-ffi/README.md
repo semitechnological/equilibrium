@@ -23,7 +23,7 @@ This creates `libmathlib.so` (or `.dylib` on macOS).
 ## Using with equilibrium
 
 ```rust
-use equilibrium::{compile_to_c, detect_language};
+use equilibrium_ffi::{compile_to_c, detect_language};
 use std::path::Path;
 
 let source = Path::new("mathlib.c");

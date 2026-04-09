@@ -1,6 +1,6 @@
 //! Frictionless Embedded STM32 Demo
 //!
-//! This example shows how equilibrium makes C library interop completely frictionless:
+//! This example shows how equilibrium-ffi makes C library interop completely frictionless:
 //! 1. Drop your STM32 HAL/CMSIS headers in stm32-libs/
 //! 2. build.rs auto-discovers and generates bindings
 //! 3. Just include!() the generated mod.rs and use them!
@@ -65,7 +65,7 @@ fn main() {
 
     println!("\n✨ Zero configuration required!");
     println!("\nHow it works:");
-    println!("  1. build.rs calls: equilibrium::scan_c_libraries(\"stm32-libs\")");
+    println!("  1. build.rs calls: equilibrium_ffi::scan_c_libraries(\"stm32-libs\")");
     println!("  2. Equilibrium recursively discovers ALL .h files");
     println!("  3. Generates Rust FFI bindings for each header file");
     println!("  4. Creates mod.rs that re-exports each header as a module");

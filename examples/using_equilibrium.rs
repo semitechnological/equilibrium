@@ -1,7 +1,7 @@
-//! Example showing the full equilibrium pipeline:
+//! Example showing the full equilibrium-ffi pipeline:
 //! detect language → compile to C → generate Rust FFI bindings
 
-use equilibrium::{
+use equilibrium_ffi::{
     compile_to_c, detect_language, find_compiler, generate_bindings, BindingOptions,
 };
 use std::path::Path;
@@ -24,7 +24,7 @@ fn main() {
 
     // ── 2. Compiler discovery ────────────────────────────────────────────────
     println!("\n2. Available Compilers:");
-    for lang in equilibrium::Language::all() {
+    for lang in equilibrium_ffi::Language::all() {
         if let Some(info) = find_compiler(*lang) {
             let compiler = info.compiler.unwrap_or_default();
             let version = info
@@ -105,7 +105,7 @@ fn main() {
     // ── 5. Directory scanning ────────────────────────────────────────────────
     println!("\n5. Scanning for Source Files:");
     let scan_root = Path::new(manifest_dir).join("examples");
-    let found = equilibrium::scan_directory(&scan_root);
+    let found = equilibrium_ffi::scan_directory(&scan_root);
     for (path, lang) in &found {
         let rel = path.strip_prefix(manifest_dir).unwrap_or(path);
         println!("   {:?}  {}", lang, rel.display());

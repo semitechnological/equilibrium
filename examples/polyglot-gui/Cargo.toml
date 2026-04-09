@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-equilibrium = { path = "../.." }
+equilibrium-ffi = { path = "../.." }
 # GPUI: uses Direct3D 11 on Windows, Wayland/X11 on Linux, Metal on macOS
 # Build natively on Windows: cargo build --release (needs VS Build Tools)
 # Build on Linux: cargo build --release (needs mesa-vulkan-drivers)
@@ -25,5 +25,5 @@ path = "src/tui.rs"
 
 [build-dependencies]
 cc = "1"
-equilibrium = { path = "../.." }
+equilibrium-ffi = { path = "../.." }
 which = "6"

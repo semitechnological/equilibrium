@@ -1,4 +1,4 @@
-//! crepuscularity-equilibrium — Automatic C FFI generation
+//! **equilibrium-ffi** — Automatic C FFI generation
 //!
 //! This crate auto-detects C-compiling languages (V, Zig, C++, C#, etc.),
 //! compiles them to C intermediate representation, and generates Rust bindings
@@ -17,7 +17,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use crepuscularity_equilibrium::{detect_language, compile_to_c, generate_bindings};
+//! use equilibrium_ffi::{detect_language, compile_to_c, generate_bindings};
 //!
 //! let source = Path::new("mylib.v");
 //! let lang = detect_language(source)?;
@@ -34,6 +34,6 @@ pub use bindings::{generate_bindings, BindingOptions, GeneratedBinding};
 pub use compiler::{compile_batch, compile_to_c, CompileError, CompileResult};
 pub use detector::{detect_language, find_compiler, scan_directory, Language, LanguageInfo};
 pub use scanner::{
-    scan_c_libraries, AutoBindingOptions, GenerationResult, LibraryBindingResult,
-    LibraryDiscovery, LibraryScanner,
+    scan_c_libraries, AutoBindingOptions, GenerationResult, LibraryBindingResult, LibraryDiscovery,
+    LibraryScanner,
 };

@@ -343,7 +343,7 @@ fn ui(frame: &mut Frame, app: &App) {
 
     // ── Footer ────────────────────────────────────────────────────────────────
     let footer = Paragraph::new(Span::styled(
-        "Built with equilibrium (auto-generated FFI bindings)",
+        "Built with equilibrium-ffi (auto-generated FFI bindings)",
         Style::default().fg(Color::DarkGray),
     ))
     .alignment(Alignment::Center);

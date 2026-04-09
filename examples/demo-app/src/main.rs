@@ -1,6 +1,6 @@
-//! Polyglot Calculator — end-to-end equilibrium demo
+//! Polyglot Calculator — end-to-end equilibrium-ffi demo
 //!
-//! build.rs compiles foreign-code/math.c and uses equilibrium to generate
+//! build.rs compiles foreign-code/math.c and uses equilibrium-ffi to generate
 //! Rust FFI bindings automatically. This file just calls those functions.
 
 // Pull in the bindings that build.rs wrote to OUT_DIR
@@ -31,16 +31,16 @@ fn main() {
     println!("\n✓ All assertions passed!");
     println!("\nHow it works:");
     println!("  1. build.rs compiles foreign-code/math.c into a static library via the cc crate");
-    println!("  2. build.rs calls equilibrium::generate_bindings() on math.h");
+    println!("  2. build.rs calls equilibrium_ffi::generate_bindings() on math.h");
     println!("  3. The generated bindings are written to $OUT_DIR/math_bindings.rs");
     println!("  4. This file includes those bindings with include!() and calls them directly");
 
-    // Also demonstrate the equilibrium library functions at runtime
-    println!("\n--- Runtime equilibrium API ---");
+    // Also demonstrate the equilibrium-ffi library functions at runtime
+    println!("\n--- Runtime equilibrium-ffi API ---");
     let manifest = env!("CARGO_MANIFEST_DIR");
     let c_source = std::path::Path::new(manifest).join("foreign-code/math.c");
 
-    if let Some(lang) = equilibrium::detect_language(&c_source) {
+    if let Some(lang) = equilibrium_ffi::detect_language(&c_source) {
         println!(
             "detect_language({:?}) = {:?}",
             c_source.file_name().unwrap(),
@@ -48,7 +48,7 @@ fn main() {
         );
     }
 
-    if let Some(info) = equilibrium::find_compiler(equilibrium::Language::C) {
+    if let Some(info) = equilibrium_ffi::find_compiler(equilibrium_ffi::Language::C) {
         println!(
             "find_compiler(C) = {} {}",
             info.compiler.as_deref().unwrap_or("?"),

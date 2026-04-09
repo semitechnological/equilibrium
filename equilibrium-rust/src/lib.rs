@@ -1,7 +1,7 @@
-//! Ergonomic FFI exports for equilibrium
+//! Ergonomic FFI exports for equilibrium-ffi
 //!
 //! The `#[ffi]` attribute automatically adds `#[no_mangle]` and `extern "C"`
-//! to make functions callable from C and other languages via equilibrium.
+//! to make functions callable from C and other languages via equilibrium-ffi.
 
 use proc_macro::TokenStream;
 use quote::quote;

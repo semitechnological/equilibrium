@@ -5,6 +5,9 @@ use std::process::Command;
 
 use crate::detector::{find_compiler, Language};
 
+/// Maximum source file size passed to `compile_to_c` (denial-of-service guard).
+const MAX_SOURCE_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Error during compilation.
 #[derive(Debug)]
 pub enum CompileError {
@@ -79,6 +82,24 @@ pub fn compile_to_c_with_lang(
     output_dir: &Path,
     language: Language,
 ) -> Result<CompileResult, CompileError> {
+    if !input.is_file() {
+        return Err(CompileError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "compile_to_c input must be a regular file",
+        )));
+    }
+    let meta = std::fs::metadata(input)?;
+    if meta.len() > MAX_SOURCE_FILE_BYTES {
+        return Err(CompileError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "source file too large ({} bytes; max {} bytes)",
+                meta.len(),
+                MAX_SOURCE_FILE_BYTES
+            ),
+        )));
+    }
+
     // Find compiler
     let info = find_compiler(language).ok_or(CompileError::CompilerNotFound { language })?;
 

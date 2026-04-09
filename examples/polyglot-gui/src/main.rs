@@ -362,7 +362,7 @@ impl Render for PolyglotCalc {
                 div()
                     .text_color(rgb(0x3f3f46u32))
                     .text_size(rems(0.7))
-                    .child("Built with equilibrium (auto-generated FFI) + GPUI"),
+                    .child("Built with equilibrium-ffi (auto-generated FFI) + GPUI"),
             )
     }
 }

@@ -19,13 +19,13 @@ cargo build --release
 
 This produces `target/release/libmathlib.so` (or `.dylib` on macOS, `.dll` on Windows).
 
-## Using with equilibrium
+## Using with equilibrium-ffi
 
 ```bash
-# Generate bindings
-equilibrium compile src/lib.rs --output bindings/
+# From a generated C header, e.g.:
+# eq generate path/to/mathlib.h -o bindings.rs
 
-# Or use in another Rust project
+# This example crate builds standalone:
 cargo build
 ```
 

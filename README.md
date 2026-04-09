@@ -40,7 +40,7 @@ Multiple compilers install in parallel.
 ### 1. Language Detection
 
 ```rust
-use equilibrium::detect_language;
+use equilibrium_ffi::detect_language;
 use std::path::Path;
 
 let source = Path::new("mylib.v");
@@ -52,7 +52,7 @@ if let Some(lang) = detect_language(source) {
 ### 2. Compiler Detection
 
 ```rust
-use equilibrium::{find_compiler, Language};
+use equilibrium_ffi::{find_compiler, Language};
 
 if let Some(info) = find_compiler(Language::Zig) {
     println!("Found: {}", info.compiler.unwrap());
@@ -62,7 +62,7 @@ if let Some(info) = find_compiler(Language::Zig) {
 ### 3. Compilation to C
 
 ```rust
-use equilibrium::compile_to_c;
+use equilibrium_ffi::compile_to_c;
 use std::path::Path;
 
 let source = Path::new("math.v");
@@ -77,7 +77,7 @@ match compile_to_c(source, output_dir) {
 ### 4. Binding Generation
 
 ```rust
-use equilibrium::generate_bindings;
+use equilibrium_ffi::generate_bindings;
 
 let bindings = generate_bindings(&c_header_path, &Default::default())?;
 println!("{}", bindings.code);
@@ -102,13 +102,13 @@ println!("{}", bindings.code);
 
 ```toml
 [dependencies]
-equilibrium = { git = "https://github.com/semitechnological/equilibrium" }
+equilibrium-ffi = { git = "https://github.com/semitechnological/equilibrium" }
 ```
 
 For the `eq` CLI:
 ```toml
 [dependencies]
-equilibrium = { git = "https://github.com/semitechnological/equilibrium", features = ["cli"] }
+equilibrium-ffi = { git = "https://github.com/semitechnological/equilibrium", features = ["cli"] }
 ```
 
 Or install globally:
@@ -206,4 +206,4 @@ cargo test
 
 ## License
 
-MIT
+MPL-2.0

@@ -1,9 +1,9 @@
 [package]
-name = "equilibrium"
+name = "equilibrium-ffi"
 version = "0.1.0"
 edition = "2021"
 description = "Automatic C FFI generation for C-compiling languages (V, Zig, C++, C#, Rust, D, Nim, Odin)"
-license = "MIT"
+license = "MPL-2.0"
 repository = "https://github.com/semitechnological/equilibrium"
 
 [dependencies]

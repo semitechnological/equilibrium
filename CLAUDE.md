@@ -52,7 +52,7 @@ The `eq` binary (feature-gated behind `cli`) provides four subcommands:
 - `eq check` — detects all supported compilers and shows versions/paths
 - `eq install [names…]` — installs missing compilers via the best available package manager; multiple compilers install in parallel. Install order: **wax → brew/linuxbrew → apt/dnf/pacman** on Linux/macOS, **wax → winget → scoop** on Windows.
 - `eq build [args…]` — runs `cargo build` with all known compiler bin dirs prepended to PATH (linuxbrew, homebrew, `/usr/local/sbin`, etc.)
-- `eq generate <header> [-o file]` — emits Rust `extern "C"` bindings from a C header via `equilibrium::generate_bindings`
+- `eq generate <header> [-o file]` — emits Rust `extern "C"` bindings from a C header via `equilibrium_ffi::generate_bindings`
 
 ### Helper Libraries
 
@@ -65,7 +65,7 @@ Language-specific ergonomic crates live in sibling directories:
 ### Examples
 
 - `examples/using_equilibrium.rs` — demonstrates all three pipeline stages (detect, compile, generate bindings, scan_directory)
-- `examples/demo-app/` — minimal end-to-end demo: `build.rs` compiles `math.c` via `cc` and generates bindings with equilibrium; `main.rs` calls C functions through the generated `include!()`d bindings
+- `examples/demo-app/` — minimal end-to-end demo: `build.rs` compiles `math.c` via `cc` and generates bindings with equilibrium-ffi; `main.rs` calls C functions through the generated `include!()`d bindings
 - `examples/full-demo/` — full demo calling a C calculator library from Rust
 - `examples/polyglot-gui/` — interactive polyglot dashboard with a ratatui TUI (`polyglot-tui`) and a GPUI GUI (`polyglot-gui`). Calls live FFI into C, C++, Zig, Nim, V, D, Odin, and Rust. `build.rs` uses `find_bin()` with hardcoded linuxbrew fallbacks so compilers are found regardless of the shell PATH that cargo inherits.
 

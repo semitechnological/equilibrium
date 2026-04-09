@@ -2,6 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+/// Maximum header file size accepted for binding generation (denial-of-service guard).
+const MAX_HEADER_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Maximum number of lines parsed from a header (CPU / memory guard).
+const MAX_HEADER_LINES: usize = 200_000;
+
 /// Options for binding generation.
 #[derive(Clone, Debug, Default)]
 pub struct BindingOptions {
@@ -41,17 +47,43 @@ pub fn generate_bindings(
     if !header.exists() {
         return Err(format!("Header file not found: {}", header.display()));
     }
+    if !header.is_file() {
+        return Err(format!(
+            "Header path is not a regular file: {}",
+            header.display()
+        ));
+    }
+
+    let meta =
+        std::fs::metadata(header).map_err(|e| format!("Failed to read header metadata: {e}"))?;
+    if meta.len() > MAX_HEADER_BYTES {
+        return Err(format!(
+            "Header too large ({} bytes; max {} bytes)",
+            meta.len(),
+            MAX_HEADER_BYTES
+        ));
+    }
 
     let content =
         std::fs::read_to_string(header).map_err(|e| format!("Failed to read header: {e}"))?;
+
+    let line_count = content.lines().count();
+    if line_count > MAX_HEADER_LINES {
+        return Err(format!(
+            "Header has too many lines ({line_count}; max {MAX_HEADER_LINES})"
+        ));
+    }
 
     let mut warnings = Vec::new();
     let mut code = String::new();
 
     // File header — use regular // comments so the output is valid when include!()'d into a module
-    code.push_str("// Auto-generated bindings by crepuscularity-equilibrium\n");
+    code.push_str("// Auto-generated bindings by equilibrium-ffi\n");
     code.push_str("//\n");
-    code.push_str(&format!("// Source: {}\n", header.display()));
+    code.push_str(&format!(
+        "// Source: {}\n",
+        sanitize_path_for_comment(header)
+    ));
     code.push('\n');
     code.push_str("use std::os::raw::*;\n");
     code.push('\n');
@@ -79,8 +111,16 @@ pub fn generate_bindings(
     for typedef in &parsed.typedefs {
         if should_include(&typedef.name, &options.allowlist_types) {
             // Skip if this is just an alias to a struct/enum we already generated
-            let is_struct_alias = typedef.target.starts_with("struct ") && parsed.structs.iter().any(|s| format!("struct {}", s.name) == typedef.target);
-            let is_enum_alias = typedef.target.starts_with("enum ") && parsed.enums.iter().any(|e| format!("enum {}", e.name) == typedef.target);
+            let is_struct_alias = typedef.target.starts_with("struct ")
+                && parsed
+                    .structs
+                    .iter()
+                    .any(|s| format!("struct {}", s.name) == typedef.target);
+            let is_enum_alias = typedef.target.starts_with("enum ")
+                && parsed
+                    .enums
+                    .iter()
+                    .any(|e| format!("enum {}", e.name) == typedef.target);
             if !is_struct_alias && !is_enum_alias {
                 code.push_str(&generate_typedef(typedef, options));
                 code.push('\n');
@@ -109,6 +149,15 @@ pub fn generate_bindings(
 
 fn should_include(name: &str, allowlist: &[String]) -> bool {
     allowlist.is_empty() || allowlist.iter().any(|a| a == name)
+}
+
+/// Strip control characters from a path so a generated `//` comment stays single-line.
+fn sanitize_path_for_comment(path: &Path) -> String {
+    path.display()
+        .to_string()
+        .chars()
+        .filter(|c| !matches!(c, '\n' | '\r' | '\0'))
+        .collect()
 }
 
 // Simple C header parsing (for basic cases)
@@ -143,6 +192,9 @@ struct FunctionDef {
 }
 
 fn parse_c_header(content: &str) -> ParsedHeader {
+    // Stop scanning a typedef block after this many lines without `}` (corrupt / hostile input).
+    const MAX_TYPEDEF_BLOCK_LINES: usize = 16_384;
+
     let mut typedefs = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
@@ -160,12 +212,17 @@ fn parse_c_header(content: &str) -> ParsedHeader {
             if line.contains("enum") && line.contains('{') {
                 // Multi-line typedef enum
                 let mut enum_content = String::new();
+                let mut extend_lines = 0usize;
                 while i < lines.len() && !lines[i].contains('}') {
+                    extend_lines += 1;
+                    if extend_lines > MAX_TYPEDEF_BLOCK_LINES {
+                        break;
+                    }
                     enum_content.push_str(lines[i]);
                     enum_content.push(' ');
                     i += 1;
                 }
-                if i < lines.len() {
+                if i < lines.len() && lines[i].contains('}') {
                     enum_content.push_str(lines[i]);
                 }
                 // Parse typedef enum
@@ -179,12 +236,17 @@ fn parse_c_header(content: &str) -> ParsedHeader {
             } else if line.contains("struct") && line.contains('{') {
                 // Multi-line typedef struct
                 let mut struct_content = String::new();
+                let mut extend_lines = 0usize;
                 while i < lines.len() && !lines[i].contains('}') {
+                    extend_lines += 1;
+                    if extend_lines > MAX_TYPEDEF_BLOCK_LINES {
+                        break;
+                    }
                     struct_content.push_str(lines[i]);
                     struct_content.push(' ');
                     i += 1;
                 }
-                if i < lines.len() {
+                if i < lines.len() && lines[i].contains('}') {
                     struct_content.push_str(lines[i]);
                 }
                 // Parse typedef struct
@@ -231,16 +293,16 @@ fn parse_c_header(content: &str) -> ParsedHeader {
 fn parse_typedef_struct(content: &str) -> Option<StructDef> {
     // typedef struct { ... } name;
     let content = content.trim();
-    
+
     // Extract struct name from end: } NAME;
     let end_part = content.strip_suffix(';')?.trim();
     let name = end_part.split_whitespace().last()?.to_string();
-    
+
     // Extract fields between { and }
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     let fields_str = &content[start + 1..end];
-    
+
     let mut fields = Vec::new();
     // Split by semicolons, not lines (fields end with ;)
     for field in fields_str.split(';') {
@@ -248,7 +310,7 @@ fn parse_typedef_struct(content: &str) -> Option<StructDef> {
         if field.is_empty() || field.starts_with("//") {
             continue;
         }
-        
+
         // Parse "type name" or "type name[size]"
         // Handle "uint32_t Pin" or "char* name"
         let parts: Vec<&str> = field.split_whitespace().collect();
@@ -258,37 +320,37 @@ fn parse_typedef_struct(content: &str) -> Option<StructDef> {
             fields.push((field_type, field_name));
         }
     }
-    
+
     Some(StructDef { name, fields })
 }
 
 fn parse_typedef_enum(content: &str) -> Option<EnumDef> {
     // typedef enum { VAR1 = 0, VAR2 = 1 } name;
     let content = content.trim();
-    
+
     // Extract enum name from end: } NAME;
     let end_part = content.strip_suffix(';')?.trim();
     let name = end_part.split_whitespace().last()?.to_string();
-    
+
     // Extract variants between { and }
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     let variants_str = &content[start + 1..end];
-    
+
     let mut variants = Vec::new();
     for item in variants_str.split(',') {
         let item = item.trim();
         if item.is_empty() || item.starts_with("//") {
             continue;
         }
-        
+
         if let Some((name, value)) = item.split_once('=') {
             variants.push((name.trim().to_string(), Some(value.trim().to_string())));
         } else {
             variants.push((item.to_string(), None));
         }
     }
-    
+
     Some(EnumDef { name, variants })
 }
 
@@ -363,11 +425,11 @@ fn generate_typedef(typedef: &TypedefDef, _options: &BindingOptions) -> String {
 
 fn generate_enum(enum_def: &EnumDef, _options: &BindingOptions) -> String {
     let mut code = String::new();
-    
+
     code.push_str("#[repr(C)]\n");
     code.push_str("#[derive(Debug, Copy, Clone, PartialEq, Eq)]\n");
     code.push_str(&format!("pub enum {} {{\n", enum_def.name));
-    
+
     for (variant_name, variant_value) in &enum_def.variants {
         if let Some(value) = variant_value {
             code.push_str(&format!("    {} = {},\n", variant_name, value));
@@ -375,7 +437,7 @@ fn generate_enum(enum_def: &EnumDef, _options: &BindingOptions) -> String {
             code.push_str(&format!("    {},\n", variant_name));
         }
     }
-    
+
     code.push_str("}\n");
     code
 }
@@ -575,6 +637,37 @@ mod tests {
         let result = generate_bindings(Path::new("/nonexistent/header.h"), &opts);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_generate_bindings_rejects_too_many_lines() {
+        let dir = tempdir().unwrap();
+        let header = dir.path().join("long.h");
+        let mut body = String::with_capacity(MAX_HEADER_LINES * 4 + 16);
+        for _ in 0..=MAX_HEADER_LINES {
+            body.push_str("//x\n");
+        }
+        std::fs::write(&header, body).unwrap();
+        let opts = BindingOptions::default();
+        let err = generate_bindings(&header, &opts).unwrap_err();
+        assert!(err.contains("too many lines"), "got: {err}");
+    }
+
+    #[test]
+    fn test_generate_bindings_rejects_oversized_file() {
+        let dir = tempdir().unwrap();
+        let header = dir.path().join("huge.h");
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&header)
+            .unwrap();
+        f.set_len(MAX_HEADER_BYTES + 1).unwrap();
+        drop(f);
+        let opts = BindingOptions::default();
+        let err = generate_bindings(&header, &opts).unwrap_err();
+        assert!(err.contains("too large"), "got: {err}");
     }
 
     #[test]

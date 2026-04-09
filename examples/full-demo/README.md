@@ -19,10 +19,10 @@ extern "C" {
 }
 ```
 
-**With Equilibrium:**
+**With equilibrium-ffi:**
 ```bash
-# Equilibrium would generate these bindings automatically
-equilibrium compile foreign-code/calculator.c --bindings src/ffi.rs
+# Generate bindings from the C header (after compiling or if you already have .h):
+eq generate foreign-code/calculator.h -o src/ffi.rs
 ```
 
 ## Running

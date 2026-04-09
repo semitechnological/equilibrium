@@ -1,4 +1,4 @@
-//! Example Rust library using equilibrium for FFI exports
+//! Example Rust library using equilibrium-ffi for FFI exports
 
 use equilibrium_rust::{ffi, ffi_struct};
 

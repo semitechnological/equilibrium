@@ -18,13 +18,13 @@ Add equilibrium to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-equilibrium = { git = "https://github.com/semitechnological/equilibrium" }
+equilibrium-ffi = { git = "https://github.com/semitechnological/equilibrium" }
 ```
 
 Basic usage:
 
 ```rust
-use equilibrium::{compile_to_c, detect_language};
+use equilibrium_ffi::{compile_to_c, detect_language};
 use std::path::Path;
 
 let source = Path::new("mylib.v");
@@ -37,7 +37,7 @@ let result = compile_to_c(source, Path::new("./build"))?;
 Equilibrium detects languages by file extension:
 
 ```rust
-use equilibrium::detect_language;
+use equilibrium_ffi::detect_language;
 use std::path::Path;
 
 let v_file = Path::new("math.v");
@@ -66,7 +66,7 @@ Supported extensions:
 Check which compilers are available:
 
 ```rust
-use equilibrium::{find_compiler, Language};
+use equilibrium_ffi::{find_compiler, Language};
 
 if let Some(info) = find_compiler(Language::Zig) {
     println!("Found: {}", info.compiler.unwrap());
@@ -87,7 +87,7 @@ Equilibrium tries primary compilers and falls back to alternatives:
 Compile source files to C intermediate representation:
 
 ```rust
-use equilibrium::compile_to_c;
+use equilibrium_ffi::compile_to_c;
 use std::path::Path;
 
 let source = Path::new("mylib.nim");
@@ -183,7 +183,7 @@ pub export fn add(a: i32, b: i32) i32 {
 Generate Rust FFI bindings from C headers:
 
 ```rust
-use equilibrium::generate_bindings;
+use equilibrium_ffi::generate_bindings;
 use std::path::Path;
 
 let header = Path::new("build/mylib.h");
@@ -224,7 +224,7 @@ pub fn add(a int, b int) int {
 **2. Compile with equilibrium:**
 
 ```rust
-use equilibrium::{compile_to_c, generate_bindings};
+use equilibrium_ffi::{compile_to_c, generate_bindings};
 use std::path::Path;
 
 // Compile V to C

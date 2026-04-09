@@ -1,4 +1,4 @@
-// Frictionless embedded C library bindings with equilibrium
+// Frictionless embedded C library bindings with equilibrium-ffi
 //
 // This build.rs automatically discovers all C headers in the stm32-libs/
 // directory and generates Rust FFI bindings for them.
@@ -7,8 +7,8 @@ fn main() {
     println!("cargo:rerun-if-changed=stm32-libs/");
 
     // ZERO-CONFIG AUTO-DISCOVERY
-    // Just point equilibrium at your C library folder and it does the rest!
-    match equilibrium::scan_c_libraries("stm32-libs").generate_all() {
+    // Just point equilibrium-ffi at your C library folder and it does the rest!
+    match equilibrium_ffi::scan_c_libraries("stm32-libs").generate_all() {
         Ok(result) => {
             println!(
                 "✓ Generated bindings for {} libraries in {}",

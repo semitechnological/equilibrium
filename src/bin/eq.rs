@@ -1,4 +1,4 @@
-//! eq — the equilibrium CLI
+//! eq — the equilibrium-ffi CLI
 //!
 //! Commands:
 //!   eq check              — show which compilers are installed
@@ -16,11 +16,7 @@ use std::process::{Command, ExitCode};
 // ── CLI definition ────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(
-    name = "eq",
-    about = "equilibrium — polyglot FFI toolkit",
-    version
-)]
+#[command(name = "eq", about = "equilibrium-ffi — polyglot FFI toolkit", version)]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -152,8 +148,8 @@ const COMPILERS: &[Compiler] = &[
             apt: "",
             dnf: "",
             pacman: "vlang",
-            winget: "",              // not in winget catalog
-            scoop: "v",              // scoop main bucket: package is named "v"
+            winget: "", // not in winget catalog
+            scoop: "v", // scoop main bucket: package is named "v"
             scoop_bucket: "",
             manual: "https://vlang.io/",
         },
@@ -174,8 +170,8 @@ const COMPILERS: &[Compiler] = &[
             apt: "ldc",
             dnf: "ldc",
             pacman: "ldc",
-            winget: "",              // not in winget catalog
-            scoop: "ldc",            // scoop main bucket
+            winget: "",   // not in winget catalog
+            scoop: "ldc", // scoop main bucket
             scoop_bucket: "",
             manual: "https://github.com/ldc-developers/ldc/releases",
         },
@@ -198,7 +194,7 @@ const COMPILERS: &[Compiler] = &[
             dnf: "",
             pacman: "odin",
             winget: "odin-lang.Odin",
-            scoop: "odin",           // scoop versions bucket
+            scoop: "odin", // scoop versions bucket
             scoop_bucket: "versions",
             manual: "https://odin-lang.org/docs/install/",
         },
@@ -264,7 +260,11 @@ fn compiler_version(path: &Path, version_args: &[&str]) -> Option<String> {
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let text = if stdout.trim().is_empty() { stderr } else { stdout };
+    let text = if stdout.trim().is_empty() {
+        stderr
+    } else {
+        stdout
+    };
     let line = text.lines().next()?.trim();
     // Strip a leading absolute-path token some compilers (odin) emit
     let line = if line.starts_with('/') || line.starts_with(r"C:\") {
@@ -273,7 +273,11 @@ fn compiler_version(path: &Path, version_args: &[&str]) -> Option<String> {
         line
     }
     .to_string();
-    if line.is_empty() { None } else { Some(line) }
+    if line.is_empty() {
+        None
+    } else {
+        Some(line)
+    }
 }
 
 struct Status<'a> {
@@ -287,8 +291,14 @@ fn check_all() -> Vec<Status<'static>> {
         .iter()
         .map(|c| {
             let path = find_bin(c.bin, c.extra_paths);
-            let version = path.as_deref().and_then(|p| compiler_version(p, c.version_args));
-            Status { compiler: c, path, version }
+            let version = path
+                .as_deref()
+                .and_then(|p| compiler_version(p, c.version_args));
+            Status {
+                compiler: c,
+                path,
+                version,
+            }
         })
         .collect()
 }
@@ -301,7 +311,7 @@ fn cmd_check() -> ExitCode {
     let _ = term.write_line("");
     let _ = term.write_line(&format!(
         "  {}",
-        style("equilibrium — compiler status").bold()
+        style("equilibrium-ffi — compiler status").bold()
     ));
     let _ = term.write_line("");
 
@@ -408,8 +418,12 @@ fn available_managers() -> Vec<PkgMgr> {
 
     if cfg!(target_os = "windows") {
         // scoop has broader coverage than winget for dev tools
-        if which::which("scoop").is_ok() { v.push(PkgMgr::Scoop); }
-        if which::which("winget").is_ok() { v.push(PkgMgr::Winget); }
+        if which::which("scoop").is_ok() {
+            v.push(PkgMgr::Scoop);
+        }
+        if which::which("winget").is_ok() {
+            v.push(PkgMgr::Winget);
+        }
         return v;
     }
 
@@ -421,9 +435,15 @@ fn available_managers() -> Vec<PkgMgr> {
         v.push(PkgMgr::Brew);
     }
     if cfg!(target_os = "linux") {
-        if which::which("apt-get").is_ok() { v.push(PkgMgr::Apt); }
-        if which::which("dnf").is_ok() { v.push(PkgMgr::Dnf); }
-        if which::which("pacman").is_ok() { v.push(PkgMgr::Pacman); }
+        if which::which("apt-get").is_ok() {
+            v.push(PkgMgr::Apt);
+        }
+        if which::which("dnf").is_ok() {
+            v.push(PkgMgr::Dnf);
+        }
+        if which::which("pacman").is_ok() {
+            v.push(PkgMgr::Pacman);
+        }
     }
     v
 }
@@ -484,20 +504,19 @@ fn install_compiler(c: &Compiler) -> bool {
         println!("  {} {}", style("$").dim(), style(&cmd_display).cyan());
 
         let status = if mgr.needs_sudo() {
-            let mut full_args = vec!["sudo".to_string(), mgr.cmd().to_string()];
-            full_args.extend(args);
-            Command::new("sh")
-                .arg("-c")
-                .arg(full_args.join(" "))
-                .status()
+            // Use argv directly — never invoke a shell around sudo/package managers.
+            Command::new("sudo").arg(mgr.cmd()).args(&args).status()
         } else {
             // Resolve full path for wax/brew/winget in case they aren't on PATH
             let home = std::env::var("HOME").unwrap_or_default();
-            let bin = find_bin(mgr.cmd(), &[
-                "/home/linuxbrew/.linuxbrew/bin",
-                "/opt/homebrew/bin",
-                &format!("{home}/.local/bin"),
-            ])
+            let bin = find_bin(
+                mgr.cmd(),
+                &[
+                    "/home/linuxbrew/.linuxbrew/bin",
+                    "/opt/homebrew/bin",
+                    &format!("{home}/.local/bin"),
+                ],
+            )
             .unwrap_or_else(|| PathBuf::from(mgr.cmd()));
             Command::new(bin).args(&args).status()
         };
@@ -537,7 +556,11 @@ fn cmd_install(names: Vec<String>) -> ExitCode {
                     );
                     had_error = true;
                 } else if s.path.is_some() {
-                    println!("{} {} is already installed.", style("✓").green(), s.compiler.lang);
+                    println!(
+                        "{} {} is already installed.",
+                        style("✓").green(),
+                        s.compiler.lang
+                    );
                 } else {
                     to_install.push(s.compiler);
                 }
@@ -548,10 +571,18 @@ fn cmd_install(names: Vec<String>) -> ExitCode {
         }
 
         if to_install.is_empty() {
-            return if had_error { ExitCode::FAILURE } else { ExitCode::SUCCESS };
+            return if had_error {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            };
         }
         let install_ok = run_installs_parallel(&to_install);
-        return if had_error { ExitCode::FAILURE } else { install_ok };
+        return if had_error {
+            ExitCode::FAILURE
+        } else {
+            install_ok
+        };
     }
 
     // Interactive multi-select for missing compilers
@@ -561,7 +592,10 @@ fn cmd_install(names: Vec<String>) -> ExitCode {
         .collect();
 
     if missing.is_empty() {
-        println!("{} All supported compilers are already installed.", style("✓").green());
+        println!(
+            "{} All supported compilers are already installed.",
+            style("✓").green()
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -622,16 +656,18 @@ fn run_installs_parallel(compilers: &[&'static Compiler]) -> ExitCode {
         })
         .collect();
 
-    let all_ok = handles
-        .into_iter()
-        .all(|h| h.join().unwrap_or(false));
+    let all_ok = handles.into_iter().all(|h| h.join().unwrap_or(false));
 
     println!();
     for (msg, _) in log.lock().unwrap().iter() {
         println!("{msg}");
     }
 
-    if all_ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if all_ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 // ── Subcommand: build ─────────────────────────────────────────────────────────
@@ -683,8 +719,8 @@ fn cmd_build(args: Vec<String>) -> ExitCode {
 // ── Subcommand: generate ──────────────────────────────────────────────────────
 
 fn cmd_generate(header: PathBuf, output: Option<PathBuf>) -> ExitCode {
-    let opts = equilibrium::BindingOptions::default();
-    match equilibrium::generate_bindings(&header, &opts) {
+    let opts = equilibrium_ffi::BindingOptions::default();
+    match equilibrium_ffi::generate_bindings(&header, &opts) {
         Ok(binding) => {
             match output {
                 Some(path) => {

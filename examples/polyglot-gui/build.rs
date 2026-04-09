@@ -54,7 +54,7 @@ fn main() {
     println!("cargo:rerun-if-changed=foreign-code/c_module.c");
     println!("cargo:rerun-if-changed=foreign-code/c_module.h");
 
-    // Generate C bindings via equilibrium
+    // Generate C bindings via equilibrium-ffi
     emit_bindings(&foreign.join("c_module.h"), &out_dir, "c_bindings.rs");
 
     // ── C++ module (always available) ──────────────────────────────────────
@@ -224,14 +224,14 @@ fn main() {
 }
 
 fn emit_bindings(header: &std::path::Path, out_dir: &std::path::Path, filename: &str) {
-    let opts = equilibrium::BindingOptions::default();
-    match equilibrium::generate_bindings(header, &opts) {
+    let opts = equilibrium_ffi::BindingOptions::default();
+    match equilibrium_ffi::generate_bindings(header, &opts) {
         Ok(binding) => {
             let _ = std::fs::write(out_dir.join(filename), &binding.code);
         }
         Err(e) => {
             eprintln!(
-                "cargo:warning=equilibrium binding failed for {:?}: {}",
+                "cargo:warning=equilibrium-ffi binding failed for {:?}: {}",
                 header, e
             );
         }

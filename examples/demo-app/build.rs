@@ -12,11 +12,11 @@ fn main() {
     println!("cargo:rerun-if-changed=foreign-code/math.c");
     println!("cargo:rerun-if-changed=foreign-code/math.h");
 
-    // Step 2: Generate Rust FFI bindings from the header using equilibrium
+    // Step 2: Generate Rust FFI bindings from the header using equilibrium-ffi
     let header = foreign.join("math.h");
-    let opts = equilibrium::BindingOptions::default();
+    let opts = equilibrium_ffi::BindingOptions::default();
 
-    match equilibrium::generate_bindings(&header, &opts) {
+    match equilibrium_ffi::generate_bindings(&header, &opts) {
         Ok(binding) => {
             let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
             let bindings_path = out_dir.join("math_bindings.rs");
@@ -24,7 +24,7 @@ fn main() {
                 .expect("failed to write generated bindings");
         }
         Err(e) => {
-            panic!("equilibrium failed to generate bindings: {}", e);
+            panic!("equilibrium-ffi failed to generate bindings: {}", e);
         }
     }
 }

@@ -1,6 +1,6 @@
 # equilibrium-rust
 
-Ergonomic FFI exports for Rust code consumed by equilibrium.
+Ergonomic FFI exports for Rust code consumed by equilibrium-ffi.
 
 ## Installation
 
