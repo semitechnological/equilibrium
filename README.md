@@ -1,8 +1,8 @@
 # Equilibrium
 
-**Automatic C FFI generation for C-compiling languages**
+**Load foreign code with one call**
 
-Equilibrium auto-detects source files in various programming languages, compiles them to C intermediate representation, and generates Rust bindings so you can call foreign code like native modules.
+Equilibrium auto-detects source files in various programming languages, compiles them to C intermediate representation, and loads the result into a Rust-friendly module handle. Binding generation is available when you need it, but `load()` is the primary path.
 
 ## `eq` CLI
 
@@ -24,7 +24,7 @@ eq install zig nim d odin
 # Build a project with all compilers on PATH
 eq build --release --bin my-app
 
-# Generate Rust FFI bindings from a C header
+# Generate Rust FFI bindings from a C header (optional)
 eq generate mylib.h -o src/mylib_ffi.rs
 ```
 
@@ -44,52 +44,17 @@ let lib = load("examples/c-ffi/mathlib.c")?;
 println!("{}", lib.output_path.display());
 ```
 
+`load()` compiles the source when needed, then gives you a loaded module wrapper you can inspect, reuse, or turn into generated bindings.
+
 ## How It Works
 
-### 1. Language Detection
+### 1. Load a source file
 
 ```rust
-use equilibrium_ffi::detect_language;
-use std::path::Path;
+use equilibrium_ffi::load;
 
-let source = Path::new("mylib.v");
-if let Some(lang) = detect_language(source) {
-    println!("Detected: {:?}", lang); // Language::V
-}
-```
-
-### 2. Compiler Detection
-
-```rust
-use equilibrium_ffi::{find_compiler, Language};
-
-if let Some(info) = find_compiler(Language::Zig) {
-    println!("Found: {}", info.compiler.unwrap());
-}
-```
-
-### 3. Compilation to C
-
-```rust
-use equilibrium_ffi::compile_to_c;
-use std::path::Path;
-
-let source = Path::new("math.v");
-let output_dir = Path::new("./build");
-
-match compile_to_c(source, output_dir) {
-    Ok(result) => println!("Output: {:?}", result.output_path),
-    Err(e) => eprintln!("Compilation failed: {}", e),
-}
-```
-
-### 4. Binding Generation
-
-```rust
-use equilibrium_ffi::generate_bindings;
-
-let bindings = generate_bindings(&c_header_path, &Default::default())?;
-println!("{}", bindings.code);
+let lib = load("math.v")?;
+println!("loaded: {}", lib.output_path.display());
 ```
 
 ## Quick Start: Using in Your Project
@@ -105,21 +70,10 @@ equilibrium-ffi = "0.1"
 
 ```rust
 // build.rs
-use std::path::Path;
-use std::process::Command;
+use equilibrium_ffi::load;
 
 fn main() {
-    // Compile C code with cc (or use equilibrium for other languages)
-    cc::Build::new()
-        .file("src/native/math.c")
-        .compile("math");
-    
-    // Generate bindings from the header
-    let header = Path::new("src/native/math.h");
-    if let Ok(bindings) = equilibrium_ffi::generate_bindings(header, &Default::default()) {
-        std::fs::write("src/math_ffi.rs", &bindings.code).unwrap();
-    }
-    
+    let _lib = load("src/native/math.v").unwrap();
     println!("cargo:rerun-if-changed=src/native/*");
 }
 ```
@@ -127,20 +81,15 @@ fn main() {
 ### 3. Call from Rust
 
 ```rust
-// src/main.rs
-mod math_ffi;
-
 fn main() {
-    unsafe {
-        println!("5 + 3 = {}", math_ffi::c_add(5, 3));
-        println!("5! = {}", math_ffi::c_factorial(5));
-    }
+    let lib = equilibrium_ffi::load("src/native/math.v").unwrap();
+    println!("{}", lib.output_path.display());
 }
 ```
 
 ### Full Example
 
-Use `load()` for the smallest path, and `generate_bindings()` when you already have headers:
+Use `load()` for the smallest path. Reach for `generate_bindings()` only when you already have a C header and want explicit Rust `extern` declarations:
 
 ```rust
 let lib = equilibrium_ffi::load("native/math.c")?;
