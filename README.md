@@ -35,6 +35,15 @@ eq generate mylib.h -o src/mylib_ffi.rs
 
 Multiple compilers install in parallel.
 
+## Quick Start
+
+```rust
+use equilibrium_ffi::load;
+
+let lib = load("examples/c-ffi/mathlib.c")?;
+println!("{}", lib.output_path.display());
+```
+
 ## How It Works
 
 ### 1. Language Detection
@@ -81,6 +90,65 @@ use equilibrium_ffi::generate_bindings;
 
 let bindings = generate_bindings(&c_header_path, &Default::default())?;
 println!("{}", bindings.code);
+```
+
+## Quick Start: Using in Your Project
+
+### 1. Add as a dependency
+
+```toml
+[dependencies]
+equilibrium-ffi = "0.1"
+```
+
+### 2. Use in build.rs
+
+```rust
+// build.rs
+use std::path::Path;
+use std::process::Command;
+
+fn main() {
+    // Compile C code with cc (or use equilibrium for other languages)
+    cc::Build::new()
+        .file("src/native/math.c")
+        .compile("math");
+    
+    // Generate bindings from the header
+    let header = Path::new("src/native/math.h");
+    if let Ok(bindings) = equilibrium_ffi::generate_bindings(header, &Default::default()) {
+        std::fs::write("src/math_ffi.rs", &bindings.code).unwrap();
+    }
+    
+    println!("cargo:rerun-if-changed=src/native/*");
+}
+```
+
+### 3. Call from Rust
+
+```rust
+// src/main.rs
+mod math_ffi;
+
+fn main() {
+    unsafe {
+        println!("5 + 3 = {}", math_ffi::c_add(5, 3));
+        println!("5! = {}", math_ffi::c_factorial(5));
+    }
+}
+```
+
+### Full Example
+
+Use `load()` for the smallest path, and `generate_bindings()` when you already have headers:
+
+```rust
+let lib = equilibrium_ffi::load("native/math.c")?;
+println!("{}", lib.output_path.display());
+```
+
+```bash
+eq generate mylib.h -o src/mylib_ffi.rs
 ```
 
 ## Supported Languages
@@ -166,7 +234,7 @@ cargo install --git https://github.com/semitechnological/equilibrium --features 
 
 ## Polyglot Demo
 
-`examples/polyglot-gui/` is a live demo calling all 8 languages from one binary.
+`examples/polyglot-gui/` is the live demo. It loads C via `load()` and shows the rest of the compilers it can find.
 
 ```bash
 cd examples/polyglot-gui
@@ -175,7 +243,7 @@ cd examples/polyglot-gui
 cargo build --bin polyglot-tui
 ./target/debug/polyglot-tui
 
-# GUI (requires GPU: D3D11 on Windows, Metal on macOS, Vulkan on Linux)
+# GUI
 cargo build --bin polyglot-gui
 ./target/debug/polyglot-gui
 ```

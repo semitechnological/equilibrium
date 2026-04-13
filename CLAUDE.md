@@ -65,6 +65,7 @@ Language-specific ergonomic crates live in sibling directories:
 ### Examples
 
 - `examples/using_equilibrium.rs` — demonstrates all three pipeline stages (detect, compile, generate bindings, scan_directory)
+- `equilibrium::load()` is the primary one-call entry point; prefer it in docs and demos when the goal is to load a single C source and use generated bindings
 - `examples/demo-app/` — minimal end-to-end demo: `build.rs` compiles `math.c` via `cc` and generates bindings with equilibrium-ffi; `main.rs` calls C functions through the generated `include!()`d bindings
 - `examples/full-demo/` — full demo calling a C calculator library from Rust
 - `examples/polyglot-gui/` — interactive polyglot dashboard with a ratatui TUI (`polyglot-tui`) and a GPUI GUI (`polyglot-gui`). Calls live FFI into C, C++, Zig, Nim, V, D, Odin, and Rust. `build.rs` uses `find_bin()` with hardcoded linuxbrew fallbacks so compilers are found regardless of the shell PATH that cargo inherits.
