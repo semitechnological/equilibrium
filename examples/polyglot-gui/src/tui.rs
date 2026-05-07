@@ -7,7 +7,8 @@ use crepuscularity_tui::{render_template, TemplateContext, TemplateValue};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{enable_raw_mode, EnterAlternateScreen},
+    style::{Color as CrosstermColor, ResetColor, SetBackgroundColor, SetForegroundColor},
+    terminal::{Clear, ClearType},
 };
 use ratatui::{
     style::{Color, Style},
@@ -263,12 +264,17 @@ fn result_row(lang: &str, linked: bool, result: String) -> TemplateContext {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 fn main() -> io::Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let terminal = ratatui::init();
+    let mut terminal = ratatui::init();
+    execute!(
+        io::stdout(),
+        SetBackgroundColor(CrosstermColor::Black),
+        SetForegroundColor(CrosstermColor::White),
+        Clear(ClearType::All)
+    )?;
+    terminal.clear()?;
     let result = run(terminal);
     ratatui::restore();
+    execute!(io::stdout(), ResetColor)?;
     result
 }
 
