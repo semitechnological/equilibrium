@@ -1,72 +1,967 @@
-//! Equilibrium Polyglot Calculator — GPUI desktop app (multi-mode)
-//!
-//! Three modes: Calculator, Sequence, Languages
-//!
-//! ## Building
-//! Windows (native, recommended):
-//!   cargo build --release
-//!
-//! Linux with Vulkan:
-//!   RUSTFLAGS="-L /tmp/gpui-libs" cargo build --bin polyglot-gui
-//!
-//! macOS:
-//!   cargo build --release
+use std::time::Duration;
 
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+use crepuscularity_gpui::prelude::*;
+use gpui::{
+    div, px, rgb, size, AnyElement, App, Application, AsyncApp, Bounds, Div, FontWeight,
+    HighlightStyle, MouseButton, MouseDownEvent, StyledText, Task, Timer, WeakEntity, Window,
+    WindowBounds, WindowOptions,
+};
+use rayon::prelude::*;
 
-use gpui::*;
-use std::os::raw::c_int;
-
-// ── C FFI (always linked) ────────────────────────────────────────────────────
 #[cfg(has_c)]
 mod c_ffi {
     include!(concat!(env!("OUT_DIR"), "/c_bindings.rs"));
 }
-
-// ── C++ FFI (always linked) ──────────────────────────────────────────────────
 #[cfg(has_cpp)]
 mod cpp_ffi {
     include!(concat!(env!("OUT_DIR"), "/cpp_bindings.rs"));
 }
 
-// ── Zig FFI (linked when zig was found at build time) ────────────────────────
 #[cfg(has_zig)]
 extern "C" {
-    fn zig_square(n: c_int) -> c_int;
-    fn zig_sum_1_to_n(n: i64) -> i64;
-    fn zig_is_power_of_two(n: u64) -> bool;
+    fn zig_square(n: i64) -> i64;
+    fn zig_spiral_sum(n: i64) -> i64;
+    fn zig_chaos_fold(n: i64) -> i64;
 }
 
-// ── Nim FFI (linked when nim was found at build time) ────────────────────────
+#[cfg(not(has_zig))]
+unsafe fn zig_square(_: i64) -> i64 {
+    0
+}
+#[cfg(not(has_zig))]
+unsafe fn zig_spiral_sum(_: i64) -> i64 {
+    0
+}
+#[cfg(not(has_zig))]
+unsafe fn zig_chaos_fold(_: i64) -> i64 {
+    0
+}
+
 #[cfg(has_nim)]
 extern "C" {
     fn nim_popcount(n: u32) -> i32;
     fn nim_reverse_bits(n: u32) -> u32;
+    fn nim_rotate_left(n: u32, shift: u32) -> u32;
 }
 
-// ── V FFI (linked when v was found at build time) ────────────────────────────
+#[cfg(not(has_nim))]
+unsafe fn nim_popcount(_: u32) -> i32 {
+    0
+}
+#[cfg(not(has_nim))]
+unsafe fn nim_reverse_bits(n: u32) -> u32 {
+    n.reverse_bits()
+}
+#[cfg(not(has_nim))]
+unsafe fn nim_rotate_left(n: u32, shift: u32) -> u32 {
+    n.rotate_left(shift)
+}
+
 #[cfg(has_v)]
 extern "C" {
     fn v_celsius_to_fahrenheit(c: f64) -> f64;
     fn v_km_to_miles(km: f64) -> f64;
+    fn v_kelvin_to_rankine(k: f64) -> f64;
 }
 
-// ── D FFI (linked when ldc2 was found at build time) ─────────────────────────
+#[cfg(not(has_v))]
+unsafe fn v_celsius_to_fahrenheit(c: f64) -> f64 {
+    c.mul_add(9.0 / 5.0, 32.0)
+}
+#[cfg(not(has_v))]
+unsafe fn v_km_to_miles(km: f64) -> f64 {
+    km * 0.621_371
+}
+#[cfg(not(has_v))]
+unsafe fn v_kelvin_to_rankine(k: f64) -> f64 {
+    k * 9.0 / 5.0
+}
+
 #[cfg(has_d)]
 extern "C" {
     fn d_abs(n: i32) -> i32;
     fn d_triangular(n: i32) -> i64;
+    fn d_clamp(n: i32, lo: i32, hi: i32) -> i32;
+    fn d_collatz_steps(n: i32) -> i32;
 }
 
-// ── Odin FFI (linked when odin was found at build time) ──────────────────────
+#[cfg(not(has_d))]
+unsafe fn d_abs(_: i32) -> i32 {
+    0
+}
+#[cfg(not(has_d))]
+unsafe fn d_triangular(_: i32) -> i64 {
+    0
+}
+#[cfg(not(has_d))]
+unsafe fn d_clamp(n: i32, _: i32, _: i32) -> i32 {
+    n
+}
+#[cfg(not(has_d))]
+unsafe fn d_collatz_steps(_: i32) -> i32 {
+    0
+}
+
 #[cfg(has_odin)]
 extern "C" {
     fn odin_abs(n: i32) -> i32;
     fn odin_min(a: i32, b: i32) -> i32;
     fn odin_max(a: i32, b: i32) -> i32;
+    fn odin_mix(a: i32, b: i32) -> i32;
+    fn odin_clamp(n: i32, lo: i32, hi: i32) -> i32;
 }
 
-// ── Rust native ───────────────────────────────────────────────────────────────
+#[cfg(not(has_odin))]
+unsafe fn odin_abs(_: i32) -> i32 {
+    0
+}
+#[cfg(not(has_odin))]
+unsafe fn odin_min(a: i32, b: i32) -> i32 {
+    a.min(b)
+}
+#[cfg(not(has_odin))]
+unsafe fn odin_max(a: i32, b: i32) -> i32 {
+    a.max(b)
+}
+#[cfg(not(has_odin))]
+unsafe fn odin_mix(a: i32, b: i32) -> i32 {
+    (a * 31) ^ (b * 17)
+}
+#[cfg(not(has_odin))]
+unsafe fn odin_clamp(n: i32, lo: i32, hi: i32) -> i32 {
+    n.clamp(lo, hi)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Constellation,
+    Pipeline,
+}
+
+struct Star {
+    x: f32,
+    y: f32,
+    z: f32,
+    phase: f32,
+}
+
+struct ShootingStar {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+    life: f32,
+}
+
+struct Burst {
+    x: f32,
+    y: f32,
+    age: f32,
+    seed: u32,
+}
+
+#[derive(Clone, Copy)]
+struct AsciiCell {
+    ch: char,
+    color: u32,
+}
+
+struct AsciiRow {
+    text: String,
+    highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
+}
+
+struct LogEntry {
+    lang: &'static str,
+    text: String,
+    color: u32,
+}
+
+struct Dashboard {
+    _animation: Task<()>,
+    n: i64,
+    mode: Mode,
+    tick: f32,
+    stars: Vec<Star>,
+    shooting_star: ShootingStar,
+    bursts: Vec<Burst>,
+    log: Vec<LogEntry>,
+}
+
+impl Dashboard {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let stars = (0..420)
+            .map(|i| Star {
+                x: ((i * 73 + i * i * 17) % 1000) as f32 / 1000.0,
+                y: ((i * 191 + i * i * 11) % 1000) as f32 / 1000.0,
+                z: 0.12 + ((i * 37) % 100) as f32 / 100.0,
+                phase: ((i * 29) % 360) as f32,
+            })
+            .collect();
+        let animation = cx.spawn(
+            async move |this: WeakEntity<Dashboard>, cx: &mut AsyncApp| loop {
+                Timer::after(Duration::from_millis(33)).await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.mode == Mode::Constellation {
+                            this.advance(cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            },
+        );
+
+        Self {
+            _animation: animation,
+            n: 7,
+            mode: Mode::Constellation,
+            tick: 0.0,
+            stars,
+            shooting_star: ShootingStar {
+                x: 0.2,
+                y: 0.15,
+                vx: 0.004,
+                vy: 0.0025,
+                life: 1.0,
+            },
+            bursts: Vec::new(),
+            log: Vec::new(),
+        }
+    }
+
+    fn push_log(&mut self, lang: &'static str, text: impl Into<String>, color: u32) {
+        self.log.push(LogEntry {
+            lang,
+            text: text.into(),
+            color,
+        });
+        if self.log.len() > 80 {
+            self.log.drain(0..self.log.len() - 80);
+        }
+    }
+
+    fn burst(&mut self, x: f32, y: f32, seed: u32, cx: &mut Context<Self>) {
+        self.bursts.push(Burst {
+            x,
+            y,
+            age: 0.0,
+            seed,
+        });
+        self.push_log("UI", "constellation burst", 0xf8fafc);
+        cx.notify();
+    }
+
+    fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
+        self.mode = mode;
+        self.push_log(
+            "UI",
+            match mode {
+                Mode::Constellation => "view constellation",
+                Mode::Pipeline => "view pipeline",
+            },
+            0xf8fafc,
+        );
+        cx.notify();
+    }
+
+    fn shift(&mut self, amount: i64, cx: &mut Context<Self>) {
+        self.n = (self.n + amount).clamp(0, 1_000_000);
+        cx.notify();
+    }
+
+    fn dec_100(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.shift(-100, cx);
+    }
+    fn dec_10(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.shift(-10, cx);
+    }
+    fn dec_1(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.shift(-1, cx);
+    }
+    fn inc_1(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.shift(1, cx);
+    }
+    fn inc_10(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.shift(10, cx);
+    }
+    fn inc_100(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.shift(100, cx);
+    }
+    fn reset(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.n = 7;
+        cx.notify();
+    }
+
+    fn advance(&mut self, cx: &mut Context<Self>) {
+        self.tick += 0.065;
+        for (i, star) in self.stars.iter_mut().enumerate() {
+            let drift = ((self.tick * 0.6 + star.phase + i as f32 * 0.03).sin()) * 0.00065;
+            star.x = (star.x + drift + 1.0) % 1.0;
+            star.y = (star.y + drift * 0.72 + 1.0) % 1.0;
+            star.phase += 0.015 + star.z * 0.005;
+        }
+
+        self.shooting_star.x += self.shooting_star.vx;
+        self.shooting_star.y += self.shooting_star.vy;
+        self.shooting_star.life -= 0.01;
+        if self.shooting_star.x > 1.15
+            || self.shooting_star.y > 1.15
+            || self.shooting_star.life <= 0.0
+        {
+            self.shooting_star = ShootingStar {
+                x: -0.1,
+                y: 0.12 + (self.tick.sin() * 0.25 + 0.25),
+                vx: 0.006,
+                vy: 0.0022,
+                life: 1.0,
+            };
+            self.push_log("Zig", "shooting star", 0xf59e0b);
+        }
+
+        for burst in &mut self.bursts {
+            burst.age += 0.02;
+        }
+        self.bursts.retain(|burst| burst.age < 1.2);
+
+        cx.notify();
+    }
+
+    fn on_ascii_mouse_down(
+        &mut self,
+        ev: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bounds = window.bounds();
+        let x = ((ev.position.x.to_f64() - bounds.origin.x.to_f64()) / bounds.size.width.to_f64())
+            .clamp(0.0, 1.0) as f32;
+        let y = ((ev.position.y.to_f64() - bounds.origin.y.to_f64()) / bounds.size.height.to_f64())
+            .clamp(0.0, 1.0) as f32;
+        self.burst(x, y, ev.click_count as u32, cx);
+    }
+}
+
+impl Render for Dashboard {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let n = self.n;
+        let bounds = window.bounds();
+        let width = bounds.size.width.to_f64() as f32;
+        let height = bounds.size.height.to_f64() as f32;
+
+        let mode_content: AnyElement = match self.mode {
+            Mode::Constellation => div().into_any_element(),
+            Mode::Pipeline => pipeline_scene(pipeline_entries(n)).into_any_element(),
+        };
+        let background: AnyElement = match self.mode {
+            Mode::Constellation => background_scene(
+                width,
+                height,
+                self.tick,
+                &self.stars,
+                &self.shooting_star,
+                &self.bursts,
+                cx,
+            )
+            .into_any_element(),
+            Mode::Pipeline => div()
+                .absolute()
+                .left(px(0.0))
+                .top(px(0.0))
+                .right(px(0.0))
+                .bottom(px(0.0))
+                .into_any_element(),
+        };
+
+        div()
+            .relative()
+            .w_full()
+            .h_full()
+            .overflow_hidden()
+            .bg(rgb(0x050507))
+            .text_color(rgb(0xf4f4f5))
+            .child(background)
+            .child(mode_switcher(self.mode, cx))
+            .when(self.mode == Mode::Constellation, |root| {
+                root.child(constellation_log_panel(
+                    &self.stars,
+                    &self.shooting_star,
+                    &self.log,
+                ))
+            })
+            .when(self.mode == Mode::Pipeline, |root| {
+                root.child(
+                    div()
+                        .absolute()
+                        .left(px(28.0))
+                        .right(px(28.0))
+                        .top(px(24.0))
+                        .flex()
+                        .justify_end()
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(420.0))
+                                .overflow_hidden()
+                                .flex()
+                                .flex_col()
+                                .items_end()
+                                .child(title(self.mode))
+                                .child(value_badge(self.n))
+                                .child(control_strip(cx)),
+                        ),
+                )
+            })
+            .child(mode_content)
+    }
+}
+
+fn mode_switcher(mode: Mode, cx: &mut Context<Dashboard>) -> Div {
+    let constellation = pill(
+        "Constellation",
+        cx.listener(|this, _, _, cx| this.set_mode(Mode::Constellation, cx)),
+    )
+    .when(mode == Mode::Constellation, |cx| {
+        cx.bg(rgb(0x1d4ed8)).text_color(rgb(0xffffff))
+    });
+    let pipeline = pill(
+        "Pipeline",
+        cx.listener(|this, _, _, cx| this.set_mode(Mode::Pipeline, cx)),
+    )
+    .when(mode == Mode::Pipeline, |cx| {
+        cx.bg(rgb(0x7c3aed)).text_color(rgb(0xffffff))
+    });
+
+    div()
+        .absolute()
+        .left(px(28.0))
+        .top(px(24.0))
+        .flex()
+        .gap_2()
+        .child(constellation)
+        .child(pipeline)
+}
+
+fn constellation_log_panel(
+    stars: &[Star],
+    shooting_star: &ShootingStar,
+    log: &[LogEntry],
+) -> impl IntoElement {
+    let mut panel = div()
+        .id("constellation-log")
+        .absolute()
+        .right(px(24.0))
+        .bottom(px(24.0))
+        .w(px(340.0))
+        .max_h(px(260.0))
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
+        .rounded_2xl()
+        .border_1()
+        .border_color(rgb(0x1f2937))
+        .bg(rgb(0x07080c))
+        .p_4()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(0x94a3b8))
+                .child("LIVE LOG"),
+        )
+        .child(status_line(
+            "Rust",
+            format!("field={} drift={:.3}", stars.len(), shooting_star.life),
+            0xe879f9,
+        ))
+        .child(status_line("C", "bright nebula dust".to_string(), 0x10b981))
+        .child(status_line("C++", "deep shadow dust".to_string(), 0x38bdf8))
+        .child(status_line(
+            "Zig",
+            "shooting star trail".to_string(),
+            0xf59e0b,
+        ))
+        .child(status_line(
+            "Nim",
+            "cyan shimmer glyphs".to_string(),
+            0x22d3ee,
+        ))
+        .child(status_line(
+            "V",
+            "mint shimmer glyphs".to_string(),
+            0x4ade80,
+        ))
+        .child(status_line("D", "even burst rings".to_string(), 0x60a5fa))
+        .child(status_line("Odin", "odd burst rings".to_string(), 0xfb7185));
+
+    let start = log.len().saturating_sub(7);
+    for line in log.iter().skip(start) {
+        panel = panel.child(status_line(line.lang, line.text.clone(), line.color));
+    }
+
+    panel
+}
+
+fn control_strip(cx: &mut Context<Dashboard>) -> Div {
+    div()
+        .w_full()
+        .max_w(px(430.0))
+        .flex()
+        .flex_nowrap()
+        .gap_1()
+        .items_end()
+        .justify_end()
+        .overflow_hidden()
+        .mt(px(12.0))
+        .child(control_pill("-100", cx.listener(Dashboard::dec_100)))
+        .child(control_pill("-10", cx.listener(Dashboard::dec_10)))
+        .child(control_pill("-1", cx.listener(Dashboard::dec_1)))
+        .child(control_pill("+1", cx.listener(Dashboard::inc_1)))
+        .child(control_pill("+10", cx.listener(Dashboard::inc_10)))
+        .child(control_pill("+100", cx.listener(Dashboard::inc_100)))
+        .child(control_pill("reset", cx.listener(Dashboard::reset)))
+}
+
+fn title(mode: Mode) -> Div {
+    div()
+        .text_2xl()
+        .font_weight(FontWeight::BOLD)
+        .child(match mode {
+            Mode::Constellation => "Constellation Engine",
+            Mode::Pipeline => "Math Pipeline",
+        })
+}
+
+fn value_badge(n: i64) -> Div {
+    div()
+        .mt(px(4.0))
+        .text_2xl()
+        .font_weight(FontWeight::BOLD)
+        .child(format!("n = {n}"))
+}
+
+fn pipeline_entries(n: i64) -> [(&'static str, String, u32); 8] {
+    let c_body = if cfg!(has_c) {
+        unsafe {
+            format!(
+                "add={}; gcd={}; fib={}; wave={}; orbit={}",
+                c_ffi::c_add(n as _, n as _),
+                c_ffi::c_gcd(n as _, (n + 1) as _),
+                c_ffi::c_fibonacci(n as _),
+                c_ffi::c_wave_hash(n as _),
+                c_ffi::c_collatz_steps(n as _),
+            )
+        }
+    } else {
+        "C not linked".into()
+    };
+
+    let cpp_body = if cfg!(has_cpp) {
+        let safe = n.min(20) as _;
+        unsafe {
+            format!(
+                "len={}; factorial={}; primorial={}; digit_sum={}; prime={}",
+                cpp_ffi::cpp_strlen(c"equilibrium".as_ptr() as _),
+                cpp_ffi::cpp_factorial(safe),
+                cpp_ffi::cpp_primorial(safe),
+                cpp_ffi::cpp_digit_sum(n as _),
+                cpp_ffi::cpp_is_prime(n as _) != 0,
+            )
+        }
+    } else {
+        "C++ not linked".into()
+    };
+
+    let zig_body = if cfg!(has_zig) {
+        unsafe {
+            format!(
+                "square={}; spiral={}; chaos_fold={}",
+                zig_square(n),
+                zig_spiral_sum(n),
+                zig_chaos_fold(n),
+            )
+        }
+    } else {
+        "Zig not linked".into()
+    };
+
+    let nim_body = if cfg!(has_nim) {
+        unsafe {
+            format!(
+                "popcount={}; reverse={:#010x}; rotate={:#010x}",
+                nim_popcount(n as u32),
+                nim_reverse_bits(n as u32),
+                nim_rotate_left(n as u32, (n as u32) & 31),
+            )
+        }
+    } else {
+        "Nim not linked".into()
+    };
+
+    let v_body = if cfg!(has_v) {
+        unsafe {
+            format!(
+                "f_to_f={:.1}; km_to_mi={:.2}; k_to_r={:.1}",
+                v_celsius_to_fahrenheit(n as f64),
+                v_km_to_miles(n as f64),
+                v_kelvin_to_rankine(n as f64 + 273.15),
+            )
+        }
+    } else {
+        "V not linked".into()
+    };
+
+    let d_body = unsafe {
+        format!(
+            "abs={}; triangular={}; clamp={}; collatz={}",
+            d_abs(-(n as i32)),
+            d_triangular(n as i32),
+            d_clamp(n as i32, 3, 13),
+            d_collatz_steps(n as i32),
+        )
+    };
+
+    let odin_body = unsafe {
+        format!(
+            "abs={}; min={}; max={}; mix={}; clamp={}",
+            odin_abs(-(n as i32)),
+            odin_min(n as i32, (n + 3) as i32),
+            odin_max(n as i32, (n + 3) as i32),
+            odin_mix(n as i32, (n * 3 + 1) as i32),
+            odin_clamp(n as i32, 5, 55),
+        )
+    };
+
+    let rust_body = format!(
+        "prime={}; next_prime={}; digit_sum={}; collatz={}",
+        rust_is_prime(n as _),
+        rust_next_prime(n as _),
+        rust_digit_sum(n),
+        rust_collatz_steps(n),
+    );
+
+    [
+        ("C", c_body, 0x10b981),
+        ("C++", cpp_body, 0x38bdf8),
+        ("Zig", zig_body, 0xf59e0b),
+        ("Nim", nim_body, 0x22d3ee),
+        ("V", v_body, 0x4ade80),
+        ("D", d_body, 0x60a5fa),
+        ("Odin", odin_body, 0xfb7185),
+        ("Rust", rust_body, 0xe879f9),
+    ]
+}
+
+fn background_scene(
+    width: f32,
+    height: f32,
+    tick: f32,
+    stars: &[Star],
+    shooting_star: &ShootingStar,
+    bursts: &[Burst],
+    cx: &mut Context<Dashboard>,
+) -> Div {
+    ascii_constellation(width, height, tick, stars, shooting_star, bursts, cx)
+}
+
+fn ascii_constellation(
+    width: f32,
+    height: f32,
+    tick: f32,
+    stars: &[Star],
+    shooting_star: &ShootingStar,
+    bursts: &[Burst],
+    cx: &mut Context<Dashboard>,
+) -> Div {
+    let layer = div()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .right(px(0.0))
+        .bottom(px(0.0))
+        .bg(rgb(0x050507))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(Dashboard::on_ascii_mouse_down),
+        );
+
+    let row_height = 8.0;
+    let rows = ((height * 1.45 / row_height).ceil() as usize).clamp(64, 360);
+    let cols = ((width * 1.75 / 3.7).ceil() as usize).clamp(180, 920);
+    let tick_bucket = (tick * 6.0) as usize;
+    let mut grid: Vec<Vec<AsciiCell>> = (0..rows)
+        .into_par_iter()
+        .map(|y| ascii_base_row(y, rows, cols, tick, tick_bucket))
+        .collect();
+
+    for star in stars {
+        let x = (star.x * cols as f32).clamp(0.0, (cols - 1) as f32) as usize;
+        let y = (star.y * rows as f32).clamp(0.0, (rows - 1) as f32) as usize;
+        let pulse = ((star.phase + tick * (0.35 + star.z)).sin() + 1.0) * 0.5;
+        let ch = match ((pulse * 5.0 + star.z * 3.0) as usize).min(7) {
+            0 => '.',
+            1 => '·',
+            2 => ':',
+            3 => '*',
+            4 => '+',
+            5 => 'o',
+            6 => '✦',
+            _ => '✧',
+        };
+        grid[y][x] = AsciiCell {
+            ch,
+            color: language_color(7),
+        };
+    }
+
+    for i in 0..24 {
+        let fade = i as f32 / 24.0;
+        let tx = shooting_star.x - shooting_star.vx * i as f32 * 9.0;
+        let ty = shooting_star.y - shooting_star.vy * i as f32 * 9.0;
+        if (0.0..=1.0).contains(&tx) && (0.0..=1.0).contains(&ty) {
+            let x = (tx * cols as f32).clamp(0.0, (cols - 1) as f32) as usize;
+            let y = (ty * rows as f32).clamp(0.0, (rows - 1) as f32) as usize;
+            grid[y][x] = AsciiCell {
+                ch: if fade < 0.2 {
+                    '✦'
+                } else if fade < 0.45 {
+                    '/'
+                } else if fade < 0.7 {
+                    '·'
+                } else {
+                    '.'
+                },
+                color: 0xf59e0b,
+            };
+        }
+    }
+
+    for burst in bursts {
+        let bx = (burst.x * cols as f32).clamp(0.0, (cols - 1) as f32) as i32;
+        let by = (burst.y * rows as f32).clamp(0.0, (rows - 1) as f32) as i32;
+        let radius = 1 + (burst.age * 4.0) as i32;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let x = bx + dx;
+                let y = by + dy;
+                if x >= 0
+                    && y >= 0
+                    && (x as usize) < cols
+                    && (y as usize) < rows
+                    && dx.abs() + dy.abs() <= radius
+                {
+                    grid[y as usize][x as usize] = AsciiCell {
+                        ch: match burst.seed % 4 {
+                            0 => '@',
+                            1 => '#',
+                            2 => '%',
+                            _ => '&',
+                        },
+                        color: if burst.seed % 2 == 0 {
+                            language_color(5)
+                        } else {
+                            language_color(6)
+                        },
+                    };
+                }
+            }
+        }
+    }
+
+    let mut rows_view = div()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .right(px(0.0))
+        .bottom(px(0.0))
+        .w_full()
+        .h_full()
+        .overflow_hidden()
+        .font_family("monospace")
+        .text_size(px(row_height))
+        .flex()
+        .flex_col();
+
+    let rendered_rows: Vec<AsciiRow> = grid.into_par_iter().map(ascii_row_data).collect();
+    for row in rendered_rows {
+        rows_view = rows_view.child(ascii_row(row, row_height));
+    }
+
+    layer.child(rows_view)
+}
+
+fn ascii_base_row(
+    y: usize,
+    rows: usize,
+    cols: usize,
+    tick: f32,
+    tick_bucket: usize,
+) -> Vec<AsciiCell> {
+    let fy = y as f32 / rows as f32;
+    let y_wave = (fy * 10.0 - tick * 0.25).cos();
+    (0..cols)
+        .map(|x| {
+            let fx = x as f32 / cols as f32;
+            let ribbon =
+                ((fx * 12.0 + tick * 0.35).sin() + y_wave + ((fx + fy) * 18.0).sin() * 0.45) / 2.45;
+            let shimmer = (x * 17 + y * 29 + tick_bucket).is_multiple_of(113);
+            let ch = if shimmer {
+                ':'
+            } else if ribbon > 0.78 {
+                '.'
+            } else if ribbon > 0.62 {
+                '·'
+            } else if ribbon < -0.86 {
+                ','
+            } else {
+                ' '
+            };
+            let color = match ch {
+                ':' => {
+                    if (x + y + tick_bucket).is_multiple_of(2) {
+                        language_color(3)
+                    } else {
+                        language_color(4)
+                    }
+                }
+                '.' | '·' => language_color(0),
+                ',' => language_color(1),
+                _ => 0x334155,
+            };
+            AsciiCell { ch, color }
+        })
+        .collect()
+}
+
+fn language_color(index: usize) -> u32 {
+    match index % 8 {
+        0 => 0x10b981,
+        1 => 0x38bdf8,
+        2 => 0xf59e0b,
+        3 => 0x22d3ee,
+        4 => 0x4ade80,
+        5 => 0x60a5fa,
+        6 => 0xfb7185,
+        _ => 0xe879f9,
+    }
+}
+
+fn ascii_row_data(row: Vec<AsciiCell>) -> AsciiRow {
+    let mut text = String::with_capacity(row.len() * 2);
+    let mut highlights = Vec::new();
+    let mut run_start = 0usize;
+    let mut run_color = row.first().map_or(0x334155, |cell| cell.color);
+
+    for cell in row {
+        let start = text.len();
+        if cell.color != run_color && start > run_start {
+            highlights.push((run_start..start, rgb(run_color).into()));
+            run_start = start;
+            run_color = cell.color;
+        }
+        text.push(cell.ch);
+    }
+
+    if text.len() > run_start {
+        highlights.push((run_start..text.len(), rgb(run_color).into()));
+    }
+
+    AsciiRow { text, highlights }
+}
+
+fn ascii_row(row: AsciiRow, row_height: f32) -> Div {
+    div()
+        .w_full()
+        .h(px(row_height))
+        .text_size(px(row_height))
+        .line_height(px(row_height))
+        .whitespace_nowrap()
+        .child(StyledText::new(row.text).with_highlights(row.highlights))
+}
+
+fn status_line(lang: &str, text: String, color: u32) -> Div {
+    div()
+        .text_sm()
+        .text_color(rgb(color))
+        .child(format!("{lang}: {text}"))
+}
+
+fn pipeline_scene(entries: [(&str, String, u32); 8]) -> impl IntoElement {
+    let mut panel = div()
+        .id("pipeline-scroll")
+        .absolute()
+        .left(px(28.0))
+        .top(px(170.0))
+        .right(px(28.0))
+        .bottom(px(24.0))
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
+        .flex()
+        .flex_col()
+        .gap_3();
+
+    for (title, body, accent) in entries {
+        panel = panel.child(card(title, body, accent));
+    }
+
+    panel
+}
+
+fn pill(label: &str, on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static) -> Div {
+    div()
+        .px_3()
+        .py_1()
+        .rounded_full()
+        .bg(rgb(0x18181b))
+        .border_1()
+        .border_color(rgb(0x27272a))
+        .cursor_pointer()
+        .child(label.to_string())
+        .on_mouse_down(MouseButton::Left, on_click)
+}
+
+fn control_pill(
+    label: &str,
+    on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    div()
+        .px_2()
+        .py_1()
+        .rounded_full()
+        .bg(rgb(0x18181b))
+        .border_1()
+        .border_color(rgb(0x27272a))
+        .text_xs()
+        .cursor_pointer()
+        .child(label.to_string())
+        .on_mouse_down(MouseButton::Left, on_click)
+}
+
+fn card(title: &str, body: String, accent: u32) -> Div {
+    div()
+        .w_full()
+        .rounded_2xl()
+        .border_1()
+        .border_color(rgb(0x27272a))
+        .bg(rgb(0x111113))
+        .p_4()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(accent))
+                .child(title.to_string()),
+        )
+        .child(div().text_sm().text_color(rgb(0xe5e7eb)).child(body))
+}
+
 fn rust_is_prime(n: u64) -> bool {
     if n < 2 {
         return false;
@@ -74,12 +969,12 @@ fn rust_is_prime(n: u64) -> bool {
     if n == 2 {
         return true;
     }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return false;
     }
     let mut i = 3u64;
     while i * i <= n {
-        if n % i == 0 {
+        if n.is_multiple_of(i) {
             return false;
         }
         i += 2;
@@ -95,601 +990,43 @@ fn rust_next_prime(after: u64) -> u64 {
     n
 }
 
-#[allow(dead_code)]
-fn rust_fibonacci(n: u64) -> u64 {
-    if n == 0 {
+fn rust_digit_sum(mut n: i64) -> i64 {
+    let mut sum = 0;
+    n = n.abs();
+    while n > 0 {
+        sum += n % 10;
+        n /= 10;
+    }
+    sum
+}
+
+fn rust_collatz_steps(mut n: i64) -> i64 {
+    if n <= 0 {
         return 0;
     }
-    if n == 1 {
-        return 1;
-    }
-    let mut a = 0u64;
-    let mut b = 1u64;
-    for _ in 2..=n {
-        let c = a.saturating_add(b);
-        a = b;
-        b = c;
-    }
-    b
-}
 
-#[allow(dead_code)]
-fn rust_factorial(n: u64) -> u64 {
-    (1..=n).fold(1u64, |acc, x| acc.saturating_mul(x))
-}
-
-// ── App state ─────────────────────────────────────────────────────────────────
-#[derive(Clone, PartialEq)]
-enum Mode {
-    Calculator,
-    Sequence,
-    Languages,
-}
-
-struct PolyglotCalc {
-    n: i32,
-    mode: Mode,
-}
-
-impl PolyglotCalc {
-    fn new(_cx: &mut Context<Self>) -> Self {
-        Self {
-            n: 7,
-            mode: Mode::Calculator,
+    let mut steps = 0;
+    while n != 1 {
+        if n % 2 == 0 {
+            n /= 2;
+        } else {
+            n = n * 3 + 1;
         }
+        steps += 1;
     }
+    steps
 }
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
-
-fn result_row(lang: &'static str, linked: bool, text: String) -> impl IntoElement {
-    let tag_col = if linked {
-        rgb(0x4ade80u32)
-    } else {
-        rgb(0x52525bu32)
-    };
-    let txt_col = if linked {
-        rgb(0xa1a1aau32)
-    } else {
-        rgb(0x3f3f46u32)
-    };
-
-    div()
-        .flex()
-        .gap(px(12.))
-        .py(px(8.))
-        .child(
-            div()
-                .w(px(56.))
-                .flex_shrink_0()
-                .text_color(tag_col)
-                .text_size(rems(0.75))
-                .font_weight(FontWeight::BOLD)
-                .child(lang),
-        )
-        .child(
-            div()
-                .flex_1()
-                .text_color(txt_col)
-                .text_size(rems(0.8))
-                .child(SharedString::from(text)),
-        )
-}
-
-fn tab_button(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    active: bool,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
-    div()
-        .id(id)
-        .cursor_pointer()
-        .px(px(16.))
-        .py(px(8.))
-        .rounded(px(6.))
-        .bg(if active {
-            rgb(0x3f3f46u32)
-        } else {
-            rgb(0x27272au32)
-        })
-        .text_color(if active {
-            rgb(0xfafafau32)
-        } else {
-            rgb(0x71717au32)
-        })
-        .text_size(rems(0.875))
-        .font_weight(if active {
-            FontWeight::BOLD
-        } else {
-            FontWeight::NORMAL
-        })
-        .on_click(on_click)
-        .child(label)
-}
-
-fn seq_cell(text: String, header: bool) -> impl IntoElement {
-    div()
-        .w(px(100.))
-        .flex_shrink_0()
-        .px(px(8.))
-        .py(px(6.))
-        .text_color(if header {
-            rgb(0x4ade80u32)
-        } else {
-            rgb(0xa1a1aau32)
-        })
-        .text_size(rems(0.8))
-        .font_weight(if header {
-            FontWeight::BOLD
-        } else {
-            FontWeight::NORMAL
-        })
-        .child(SharedString::from(text))
-}
-
-fn lang_card(
-    lang: &'static str,
-    compiler: &'static str,
-    linked: bool,
-    compiler_found: bool,
-) -> impl IntoElement {
-    let dot_color = if linked {
-        rgb(0x4ade80u32) // green
-    } else if compiler_found {
-        rgb(0xfbbf24u32) // yellow
-    } else {
-        rgb(0x52525bu32) // grey
-    };
-    let status = if linked {
-        "linked"
-    } else if compiler_found {
-        "found"
-    } else {
-        "absent"
-    };
-
-    div()
-        .flex()
-        .items_center()
-        .gap(px(10.))
-        .px(px(14.))
-        .py(px(10.))
-        .rounded(px(6.))
-        .bg(rgb(0x18181bu32))
-        // dot
-        .child(
-            div()
-                .w(px(8.))
-                .h(px(8.))
-                .rounded_full()
-                .flex_shrink_0()
-                .bg(dot_color),
-        )
-        // lang name
-        .child(
-            div()
-                .w(px(64.))
-                .flex_shrink_0()
-                .text_color(rgb(0xfafafau32))
-                .text_size(rems(0.875))
-                .font_weight(FontWeight::BOLD)
-                .child(lang),
-        )
-        // compiler
-        .child(
-            div()
-                .w(px(80.))
-                .flex_shrink_0()
-                .text_color(rgb(0x71717au32))
-                .text_size(rems(0.75))
-                .child(compiler),
-        )
-        // status
-        .child(
-            div()
-                .text_color(dot_color)
-                .text_size(rems(0.75))
-                .child(status),
-        )
-}
-
-// ── Render ────────────────────────────────────────────────────────────────────
-impl Render for PolyglotCalc {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let n = self.n.max(0);
-
-        // ── Tab bar ──────────────────────────────────────────────────────────
-        let tab_bar = div()
-            .flex()
-            .gap(px(8.))
-            .child(tab_button(
-                "tab-calc",
-                "Calculator",
-                self.mode == Mode::Calculator,
-                cx.listener(|this, _, _, cx| {
-                    this.mode = Mode::Calculator;
-                    cx.notify();
-                }),
-            ))
-            .child(tab_button(
-                "tab-seq",
-                "Sequence",
-                self.mode == Mode::Sequence,
-                cx.listener(|this, _, _, cx| {
-                    this.mode = Mode::Sequence;
-                    cx.notify();
-                }),
-            ))
-            .child(tab_button(
-                "tab-lang",
-                "Languages",
-                self.mode == Mode::Languages,
-                cx.listener(|this, _, _, cx| {
-                    this.mode = Mode::Languages;
-                    cx.notify();
-                }),
-            ));
-
-        // ── Mode content ─────────────────────────────────────────────────────
-        let content: AnyElement = match self.mode {
-            Mode::Calculator => self.render_calculator(n, cx).into_any_element(),
-            Mode::Sequence => self.render_sequence().into_any_element(),
-            Mode::Languages => self.render_languages().into_any_element(),
-        };
-
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(rgb(0x09090bu32))
-            .p(px(24.))
-            .gap(px(16.))
-            // ── Title
-            .child(
-                div()
-                    .text_color(rgb(0xfafafau32))
-                    .text_size(rems(1.2))
-                    .font_weight(FontWeight::BOLD)
-                    .child("Equilibrium · Polyglot Dashboard"),
-            )
-            // ── Tabs
-            .child(tab_bar)
-            // ── Content
-            .child(content)
-            // ── Footer
-            .child(
-                div()
-                    .text_color(rgb(0x3f3f46u32))
-                    .text_size(rems(0.7))
-                    .child("Built with equilibrium-ffi (auto-generated FFI) + GPUI"),
-            )
-    }
-}
-
-impl PolyglotCalc {
-    fn render_calculator(&self, n: i32, cx: &mut Context<Self>) -> impl IntoElement {
-        // ── Live FFI calls ────────────────────────────────────────────────────
-        #[cfg(has_c)]
-        let c_text = unsafe {
-            format!(
-                "c_add({n},{n}) = {}   c_gcd({n},{}) = {}   c_fibonacci({n}) = {}",
-                c_ffi::c_add(n, n),
-                n + 1,
-                c_ffi::c_gcd(n, n + 1),
-                c_ffi::c_fibonacci(n),
-            )
-        };
-        #[cfg(not(has_c))]
-        let c_text = String::from("not linked — C compiler absent at build time");
-
-        #[cfg(has_cpp)]
-        let cpp_text = unsafe {
-            let safe = n.min(20);
-            format!(
-                "cpp_factorial({safe}) = {}   cpp_is_prime({n}) = {}",
-                cpp_ffi::cpp_factorial(safe),
-                cpp_ffi::cpp_is_prime(n) != 0,
-            )
-        };
-        #[cfg(not(has_cpp))]
-        let cpp_text = String::from("not linked — C++ compiler absent at build time");
-
-        #[cfg(has_zig)]
-        let zig_text = unsafe {
-            format!(
-                "zig_square({n}) = {}   zig_sum_1_to_{n} = {}   zig_is_power_of_two({n}) = {}",
-                zig_square(n),
-                zig_sum_1_to_n(n as i64),
-                zig_is_power_of_two(n as u64),
-            )
-        };
-        #[cfg(not(has_zig))]
-        let zig_text = String::from("not linked — zig absent at build time");
-
-        #[cfg(has_nim)]
-        let nim_text = unsafe {
-            format!(
-                "nim_popcount({n}) = {}   nim_reverse_bits({:#010x}) = {:#010x}",
-                nim_popcount(n as u32),
-                n as u32,
-                nim_reverse_bits(n as u32),
-            )
-        };
-        #[cfg(not(has_nim))]
-        let nim_text = String::from("not linked — nim absent at build time");
-
-        #[cfg(has_v)]
-        let v_text = unsafe {
-            format!(
-                "v_celsius_to_fahrenheit({n}°C) = {:.1}°F   v_km_to_miles({n}km) = {:.2}mi",
-                v_celsius_to_fahrenheit(n as f64),
-                v_km_to_miles(n as f64),
-            )
-        };
-        #[cfg(not(has_v))]
-        let v_text = String::from("not linked — v absent at build time");
-
-        #[cfg(has_d)]
-        let d_text = unsafe {
-            format!(
-                "d_abs(-{n}) = {}   d_triangular({n}) = {}",
-                d_abs(-n),
-                d_triangular(n),
-            )
-        };
-        #[cfg(not(has_d))]
-        let d_text = String::from("not linked — ldc2 absent at build time");
-
-        #[cfg(has_odin)]
-        let odin_text = unsafe {
-            format!(
-                "odin_abs(-{n}) = {}   odin_min({n},{}) = {}   odin_max({n},{}) = {}",
-                odin_abs(-n),
-                n + 3,
-                odin_min(n, n + 3),
-                n + 3,
-                odin_max(n, n + 3),
-            )
-        };
-        #[cfg(not(has_odin))]
-        let odin_text = String::from("not linked — odin absent at build time");
-
-        let rs_text = format!(
-            "rust_is_prime({n}) = {}   rust_next_prime({n}) = {}",
-            rust_is_prime(n as u64),
-            rust_next_prime(n as u64),
-        );
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(16.))
-            // ── n control
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .child(
-                        div()
-                            .id("dec")
-                            .cursor_pointer()
-                            .px(px(20.))
-                            .py(px(10.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x27272au32))
-                            .text_color(rgb(0xfafafau32))
-                            .text_size(rems(1.2))
-                            .font_weight(FontWeight::BOLD)
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.n = this.n.saturating_sub(1);
-                                cx.notify();
-                            }))
-                            .child("−"),
-                    )
-                    .child(
-                        div()
-                            .w(px(80.))
-                            .flex()
-                            .justify_center()
-                            .text_color(rgb(0xfafafau32))
-                            .text_size(rems(2.5))
-                            .font_weight(FontWeight::BOLD)
-                            .child(SharedString::from(format!("{n}"))),
-                    )
-                    .child(
-                        div()
-                            .id("inc")
-                            .cursor_pointer()
-                            .px(px(20.))
-                            .py(px(10.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x27272au32))
-                            .text_color(rgb(0xfafafau32))
-                            .text_size(rems(1.2))
-                            .font_weight(FontWeight::BOLD)
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.n += 1;
-                                cx.notify();
-                            }))
-                            .child("+"),
-                    )
-                    .child(
-                        div()
-                            .id("double")
-                            .cursor_pointer()
-                            .px(px(20.))
-                            .py(px(10.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x27272au32))
-                            .text_color(rgb(0xa78bfau32))
-                            .text_size(rems(1.0))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.n = (this.n * 2).min(10000);
-                                cx.notify();
-                            }))
-                            .child("×2"),
-                    )
-                    .child(
-                        div()
-                            .id("reset")
-                            .cursor_pointer()
-                            .px(px(20.))
-                            .py(px(10.))
-                            .rounded(px(6.))
-                            .bg(rgb(0x27272au32))
-                            .text_color(rgb(0x71717au32))
-                            .text_size(rems(1.0))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.n = 7;
-                                cx.notify();
-                            }))
-                            .child("reset"),
-                    ),
-            )
-            // ── Results panel
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .rounded(px(8.))
-                    .bg(rgb(0x18181bu32))
-                    .px(px(20.))
-                    .py(px(4.))
-                    .child(result_row("C", cfg!(has_c), c_text))
-                    .child(result_row("C++", cfg!(has_cpp), cpp_text))
-                    .child(result_row("Zig", cfg!(has_zig), zig_text))
-                    .child(result_row("Nim", cfg!(has_nim), nim_text))
-                    .child(result_row("V", cfg!(has_v), v_text))
-                    .child(result_row("D", cfg!(has_d), d_text))
-                    .child(result_row("Odin", cfg!(has_odin), odin_text))
-                    .child(result_row("Rust", true, rs_text)),
-            )
-    }
-
-    fn render_sequence(&self) -> impl IntoElement {
-        // Header row
-        let header = div()
-            .flex()
-            .gap(px(0.))
-            .border_b_1()
-            .border_color(rgb(0x27272au32))
-            .child(seq_cell("n".to_string(), true))
-            .child(seq_cell("fib(n) [C]".to_string(), true))
-            .child(seq_cell("fact(n) [C++]".to_string(), true))
-            .child(seq_cell("n² [Zig]".to_string(), true))
-            .child(seq_cell("tri(n) [D]".to_string(), true))
-            .child(seq_cell("prime? [Rs]".to_string(), true));
-
-        let mut rows = div().flex().flex_col().gap(px(2.));
-        for i in 1i32..=8 {
-            #[cfg(has_c)]
-            let fib = unsafe { format!("{}", c_ffi::c_fibonacci(i)) };
-            #[cfg(not(has_c))]
-            let fib = "—".to_string();
-
-            #[cfg(has_cpp)]
-            let fact = unsafe { format!("{}", cpp_ffi::cpp_factorial(i.min(20))) };
-            #[cfg(not(has_cpp))]
-            let fact = "—".to_string();
-
-            #[cfg(has_zig)]
-            let sq = unsafe { format!("{}", zig_square(i)) };
-            #[cfg(not(has_zig))]
-            let sq = format!("{}", i * i);
-
-            #[cfg(has_d)]
-            let tri = unsafe { format!("{}", d_triangular(i)) };
-            #[cfg(not(has_d))]
-            let tri = format!("{}", (i as i64) * (i as i64 + 1) / 2);
-
-            let prime = if rust_is_prime(i as u64) { "yes" } else { "no" };
-
-            let row = div()
-                .flex()
-                .gap(px(0.))
-                .rounded(px(4.))
-                .bg(if i % 2 == 0 {
-                    rgb(0x18181bu32)
-                } else {
-                    rgb(0x09090bu32)
-                })
-                .child(seq_cell(format!("{i}"), false))
-                .child(seq_cell(fib, false))
-                .child(seq_cell(fact, false))
-                .child(seq_cell(sq, false))
-                .child(seq_cell(tri, false))
-                .child(seq_cell(prime.to_string(), false));
-            rows = rows.child(row);
-        }
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(4.))
-            .child(
-                div()
-                    .text_color(rgb(0x71717au32))
-                    .text_size(rems(0.8))
-                    .child("n = 1..8: fibonacci (C), factorial (C++), square (Zig), triangular (D), prime (Rust)"),
-            )
-            .child(header)
-            .child(rows)
-    }
-
-    fn render_languages(&self) -> impl IntoElement {
-        // Check which compilers are available at runtime for display
-        let zig_found = which::which("zig").is_ok();
-        let nim_found = which::which("nim").is_ok();
-        let v_found = which::which("v").is_ok();
-        let d_found = which::which("ldc2").is_ok();
-        let odin_found =
-            which::which("odin").is_ok() || std::path::Path::new("/usr/local/odin/odin").exists();
-        let cs_found = which::which("dotnet").is_ok();
-        let hare_found = which::which("hare").is_ok();
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .child(
-                div()
-                    .text_color(rgb(0x71717au32))
-                    .text_size(rems(0.8))
-                    .child("Green = linked via FFI   Yellow = compiler found   Grey = absent"),
-            )
-            .child(lang_card("C", "gcc", cfg!(has_c), true))
-            .child(lang_card("C++", "g++", cfg!(has_cpp), true))
-            .child(lang_card("Zig", "zig", cfg!(has_zig), zig_found))
-            .child(lang_card("Nim", "nim", cfg!(has_nim), nim_found))
-            .child(lang_card("V", "v", cfg!(has_v), v_found))
-            .child(lang_card("D", "ldc2", cfg!(has_d), d_found))
-            .child(lang_card("Odin", "odin", cfg!(has_odin), odin_found))
-            .child(lang_card("C#", "dotnet", false, cs_found))
-            .child(lang_card("Hare", "hare", false, hare_found))
-            .child(lang_card("Rust", "rustc", true, true))
-    }
-}
-
-// ── Entry point ───────────────────────────────────────────────────────────────
 fn main() {
     Application::new().run(|cx: &mut App| {
-        cx.open_window(
+        let bounds = Bounds::centered(None, size(px(1440.0), px(900.0)), cx);
+        let _ = cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(Bounds {
-                    origin: point(px(200.), px(150.)),
-                    size: size(px(860.), px(600.)),
-                })),
-                titlebar: Some(TitlebarOptions {
-                    title: Some(SharedString::from("Equilibrium · Polyglot Dashboard")),
-                    appears_transparent: false,
-                    ..Default::default()
-                }),
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_window, cx| cx.new(PolyglotCalc::new),
-        )
-        .unwrap();
+            |_, cx| cx.new(Dashboard::new),
+        );
+        cx.activate(true);
     });
 }
