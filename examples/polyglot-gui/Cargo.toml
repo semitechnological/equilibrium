@@ -3,27 +3,37 @@ name = "polyglot-gui"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-equilibrium-ffi = { path = "../.." }
-# GPUI: uses Direct3D 11 on Windows, Wayland/X11 on Linux, Metal on macOS
-# Build natively on Windows: cargo build --release (needs VS Build Tools)
-# Build on Linux: cargo build --release (needs mesa-vulkan-drivers)
-gpui = "0.2.2"
-which = "6"
-
-# TUI fallback for environments without GPU (e.g. WSL2 without Vulkan)
-ratatui = "0.29"
-crossterm = "0.28"
-
-[[bin]]
-name = "polyglot-gui"
-path = "src/main.rs"
-
-[[bin]]
-name = "polyglot-tui"
-path = "src/tui.rs"
-
 [build-dependencies]
 cc = "1"
 equilibrium-ffi = { path = "../.." }
 which = "6"
+
+[features]
+default = []
+gui = ["dep:gpui", "dep:crepuscularity-gpui", "dep:rayon"]
+tui = ["dep:crepuscularity-tui", "dep:ratatui", "dep:crossterm"]
+
+[dependencies]
+# GPUI: uses Direct3D 11 on Windows, Wayland/X11 on Linux, Metal on macOS
+# Build natively on Windows: cargo build --release (needs VS Build Tools)
+# Build on Linux: cargo build --release (needs mesa-vulkan-drivers)
+gpui = { version = "0.2", optional = true }
+crepuscularity-gpui = { version = "0.3.3", optional = true }
+crepuscularity-tui = { version = "0.2.1", optional = true }
+equilibrium-ffi = { path = "../.." }
+rayon = { version = "1.10", optional = true }
+which = "6"
+
+# TUI fallback for environments without GPU (e.g. WSL2 without Vulkan)
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+[[bin]]
+name = "polyglot-gui"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "polyglot-tui"
+path = "src/tui.rs"
+required-features = ["tui"]

@@ -3,19 +3,18 @@
 //! Press ← / → (or h/l) to change n, q to quit.
 //! Every keystroke triggers live FFI calls to C, C++, Zig, Nim, V, D, Odin, and Rust.
 
+use crepuscularity_tui::{render_template, TemplateContext};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    style::{Color, Style},
+    widgets::{Block, Clear},
     DefaultTerminal, Frame,
 };
-use std::{io, os::raw::c_int};
+use std::io;
 
 // ── C FFI (always linked) ────────────────────────────────────────────────────
 #[cfg(has_c)]
@@ -32,7 +31,7 @@ mod cpp_ffi {
 // ── Zig FFI (linked when zig was found at build time) ────────────────────────
 #[cfg(has_zig)]
 extern "C" {
-    fn zig_square(n: c_int) -> c_int;
+    fn zig_square(n: std::os::raw::c_int) -> std::os::raw::c_int;
     fn zig_sum_1_to_n(n: i64) -> i64;
     fn zig_is_power_of_two(n: u64) -> bool;
 }
@@ -74,12 +73,12 @@ fn rust_is_prime(n: u64) -> bool {
     if n == 2 {
         return true;
     }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return false;
     }
     let mut i = 3u64;
     while i * i <= n {
-        if n % i == 0 {
+        if n.is_multiple_of(i) {
             return false;
         }
         i += 2;
@@ -124,85 +123,48 @@ impl App {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
+const TEMPLATE: &str = r##"
+div w-full h-full flex-col bg-black text-white
+  div h-[3] border-b border-cyan-500 bg-black flex-row px-2
+    span flex-1 text-cyan-400 font-bold
+      "Equilibrium · Polyglot Calculator"
+    span text-gray-500
+      "live FFI: C C++ Zig Nim V D Odin Rust"
+  div h-[3] bg-black flex-row px-2
+    span text-gray-500
+      "n = "
+    span text-white font-bold
+      "{n}"
+  div h-[3] bg-black px-2 text-gray-500
+    "[← / h] -1   [→ / l] +1   [d] x2   [s] /2   [r] reset   [q] quit"
+  div flex-1 bg-black flex-col gap-1 px-2
+    for row in {rows}
+      div h-[2] flex-row
+        span w-[7] font-bold class:dim={!row.linked}
+          "{row.lang}"
+        span flex-1 class:dim={!row.linked}
+          "{row.result}"
+  div h-[1] bg-black text-gray-500
+    "Built with equilibrium-ffi (auto-generated FFI bindings) + crepuscularity-tui"
+"##;
+
 fn ui(frame: &mut Frame, app: &App) {
     let n = app.n;
     let area = frame.area();
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints([
-            Constraint::Length(3), // title
-            Constraint::Length(3), // controls / n display
-            Constraint::Length(3), // key hints
-            Constraint::Min(16),   // results (8 langs × 2 lines)
-            Constraint::Length(1), // footer
-        ])
-        .split(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        area,
+    );
 
     // ── Title ─────────────────────────────────────────────────────────────────
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Equilibrium",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  ·  Polyglot Calculator  ·  "),
-        Span::styled(
-            "live FFI: C  C++  Zig  Rust",
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]))
-    .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::BOTTOM));
-    frame.render_widget(title, chunks[0]);
+    let mut rows = Vec::new();
 
     // ── n display ─────────────────────────────────────────────────────────────
-    let n_display = Paragraph::new(Line::from(vec![
-        Span::styled("  n = ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{n}"),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]))
-    .block(Block::default().borders(Borders::NONE));
-    frame.render_widget(n_display, chunks[1]);
 
     // ── Key hints ─────────────────────────────────────────────────────────────
-    let hints = Paragraph::new(Line::from(vec![
-        key_hint("← / h", "−1"),
-        Span::raw("  "),
-        key_hint("→ / l", "+1"),
-        Span::raw("  "),
-        key_hint("d", "×2"),
-        Span::raw("  "),
-        key_hint("s", "÷2"),
-        Span::raw("  "),
-        key_hint("r", "reset"),
-        Span::raw("  "),
-        key_hint("q", "quit"),
-    ]))
-    .alignment(Alignment::Left);
-    frame.render_widget(hints, chunks[2]);
 
     // ── Results ───────────────────────────────────────────────────────────────
-    let results_area = chunks[3];
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2), // C
-            Constraint::Length(2), // C++
-            Constraint::Length(2), // Zig
-            Constraint::Length(2), // Nim
-            Constraint::Length(2), // V
-            Constraint::Length(2), // D
-            Constraint::Length(2), // Odin
-            Constraint::Length(2), // Rust
-        ])
-        .split(results_area);
 
     // C
     #[cfg(has_c)]
@@ -217,8 +179,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_c))]
     let c_result = String::from("not linked — C compiler was absent at build time");
-
-    render_result(frame, rows[0], "C", cfg!(has_c), &c_result, Color::Green);
+    rows.push(result_row("C", cfg!(has_c), c_result));
 
     // C++
     #[cfg(has_cpp)]
@@ -232,15 +193,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_cpp))]
     let cpp_result = String::from("not linked — C++ compiler was absent at build time");
-
-    render_result(
-        frame,
-        rows[1],
-        "C++",
-        cfg!(has_cpp),
-        &cpp_result,
-        Color::Blue,
-    );
+    rows.push(result_row("C++", cfg!(has_cpp), cpp_result));
 
     // Zig
     #[cfg(has_zig)]
@@ -254,15 +207,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_zig))]
     let zig_result = String::from("not linked — zig was absent at build time");
-
-    render_result(
-        frame,
-        rows[2],
-        "Zig",
-        cfg!(has_zig),
-        &zig_result,
-        Color::Yellow,
-    );
+    rows.push(result_row("Zig", cfg!(has_zig), zig_result));
 
     // Nim
     #[cfg(has_nim)]
@@ -275,14 +220,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_nim))]
     let nim_result = String::from("not linked — nim absent at build time");
-    render_result(
-        frame,
-        rows[3],
-        "Nim",
-        cfg!(has_nim),
-        &nim_result,
-        Color::Cyan,
-    );
+    rows.push(result_row("Nim", cfg!(has_nim), nim_result));
 
     // V
     #[cfg(has_v)]
@@ -295,7 +233,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_v))]
     let v_result = String::from("not linked — v absent at build time");
-    render_result(frame, rows[4], "V", cfg!(has_v), &v_result, Color::Green);
+    rows.push(result_row("V", cfg!(has_v), v_result));
 
     // D
     #[cfg(has_d)]
@@ -308,7 +246,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_d))]
     let d_result = String::from("not linked — ldc2 absent at build time");
-    render_result(frame, rows[5], "D", cfg!(has_d), &d_result, Color::Blue);
+    rows.push(result_row("D", cfg!(has_d), d_result));
 
     // Odin
     #[cfg(has_odin)]
@@ -324,14 +262,7 @@ fn ui(frame: &mut Frame, app: &App) {
     };
     #[cfg(not(has_odin))]
     let odin_result = String::from("not linked — odin absent at build time");
-    render_result(
-        frame,
-        rows[6],
-        "Odin",
-        cfg!(has_odin),
-        &odin_result,
-        Color::LightRed,
-    );
+    rows.push(result_row("Odin", cfg!(has_odin), odin_result));
 
     // Rust
     let rs_result = format!(
@@ -339,50 +270,21 @@ fn ui(frame: &mut Frame, app: &App) {
         rust_is_prime(n as _),
         rust_next_prime(n as _),
     );
-    render_result(frame, rows[7], "Rust", true, &rs_result, Color::Magenta);
+    rows.push(result_row("Rust", true, rs_result));
 
     // ── Footer ────────────────────────────────────────────────────────────────
-    let footer = Paragraph::new(Span::styled(
-        "Built with equilibrium-ffi (auto-generated FFI bindings)",
-        Style::default().fg(Color::DarkGray),
-    ))
-    .alignment(Alignment::Center);
-    frame.render_widget(footer, chunks[4]);
+    let mut ctx = TemplateContext::new();
+    ctx.set("n", n);
+    ctx.set("rows", rows);
+    let _ = render_template(TEMPLATE, &ctx, frame, area);
 }
 
-fn key_hint<'a>(key: &'a str, label: &'a str) -> Span<'a> {
-    Span::styled(
-        format!("[{key}] {label}"),
-        Style::default().fg(Color::DarkGray),
-    )
-}
-
-fn render_result(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    lang: &str,
-    linked: bool,
-    result: &str,
-    color: Color,
-) {
-    let tag_style = if linked {
-        Style::default().fg(color).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let result_style = if linked {
-        Style::default().fg(Color::White)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let line = Line::from(vec![
-        Span::styled(format!("{lang:<5}"), tag_style),
-        Span::raw("  "),
-        Span::styled(result.to_string(), result_style),
-    ]);
-
-    frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), area);
+fn result_row(lang: &str, linked: bool, result: String) -> TemplateContext {
+    let mut row = TemplateContext::new();
+    row.set("lang", lang.to_string());
+    row.set("linked", linked);
+    row.set("result", result);
+    row
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
