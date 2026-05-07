@@ -1,0 +1,95 @@
+div relative w-full h-full overflow-hidden tui:background-black gpui:bg-[#050507] text-white
+  if {is_gui}
+    {parts.mode_switcher}
+    if {is_dashboard}
+      div absolute left-[28px] right-[28px] top-[78px] bottom-[24px] flex flex-col gap-3
+        div flex gap-3
+          div flex-1 rounded-lg border border-cyan-700 bg-[#071015] p-4
+            "Equilibrium"
+            "mode: {mode}   n={n}"
+          div w-[220px] rounded-lg border border-[#27272a] bg-[#08080a] p-4
+            "Modules"
+            "linked  {linked_count}/8"
+            "missing {missing_count}"
+          div w-[430px] rounded-lg border border-[#27272a] bg-[#08080a] p-4
+            "Controls"
+            {parts.pipeline_controls}
+        div flex-1 flex gap-3 overflow-hidden
+          div w-[460px] overflow-hidden rounded-lg border border-[#27272a] bg-[#09090b] p-4 flex flex-col gap-3
+            "Pipeline"
+            for (lang, linked, result, status, accent) in {gui_rows}
+              div rounded-lg border border-[#27272a] bg-[#111113] p-3
+                span font-bold {accent}
+                  "{lang}  {status}"
+                span text-gray-300
+                  "{result}"
+          div flex-1 flex flex-col gap-3
+            div h-[150px] rounded-lg border border-cyan-800 bg-[#071015] p-4
+              "Session"
+              "input        {n}"
+              "ffi rows     8"
+              "active       {linked_count}"
+              "missing      {missing_count}"
+            div flex-1 rounded-lg border border-[#27272a] bg-[#050507] p-4 overflow-hidden font-[monospace] text-[9px]
+              "Constellation Preview"
+              for line in {gui_constellation_preview_rows}
+                div h-[10px] text-cyan-400
+                  "{line}"
+    if {is_constellation}
+      div absolute left-[28px] right-[28px] top-[78px] bottom-[24px] rounded-lg border border-cyan-800 bg-[#050507] p-4 overflow-hidden font-[monospace] text-[9px]
+        "Constellation"
+        for line in {gui_constellation_rows}
+          div h-[10px] text-cyan-400
+            "{line}"
+  if {is_tui}
+    if {is_dashboard}
+      div w-full h-full flex-col gap-1 p-1
+        div h-[5] flex-row gap-1
+          div flex-1 tui-panel-bright
+            "Equilibrium"
+            "mode: {mode}   n={n}"
+          div w-[22] tui-panel
+            "Modules"
+            "linked  {linked_count}/8"
+            "missing {missing_count}"
+          div w-[32] tui-panel
+            "Controls"
+            button h-[1]
+              "[1] dashboard"
+            button h-[1]
+              "[2] constellation"
+            "[tab/m] switch   [q] quit"
+        div flex-1 flex-row gap-1
+          div w-[34] tui-panel tui:overflow-y-scroll scroll-offset={pipeline_scroll}
+            "Pipeline"
+            for (lang, linked, result, status, accent) in {tui_rows}
+              div h-[2] flex-row
+                span w-[8] font-bold {accent} class:text-gray-500={!linked}
+                  "{lang}"
+                span w-[8] text-green-400 class:text-gray-500={!linked}
+                  "{status}"
+                span flex-1 tui-muted
+                  "{result}"
+          div flex-1 flex-col gap-1
+            div h-[8] tui-panel-bright
+              "Session"
+              "input        {n}"
+              "ffi rows     8"
+              "active       {linked_count}"
+              "missing      {missing_count}"
+            div flex-1 tui-panel
+              "Constellation Preview"
+              for line in {tui_constellation_preview_rows}
+                div h-[1] text-cyan-400
+                  "{line}"
+        div h-[1] flex-row bg-black text-gray-500
+          span flex-1
+            "[left/right] n +/- 1   [d] x2   [s] /2   [r] reset"
+          span
+            "crepus target: tui"
+    if {is_constellation}
+      div w-full h-full tui-panel-bright
+        "Constellation"
+        for line in {tui_constellation_rows}
+          div h-[1] text-cyan-400
+            "{line}"

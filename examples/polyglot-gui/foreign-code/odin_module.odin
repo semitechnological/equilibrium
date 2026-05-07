@@ -25,7 +25,7 @@ odin_abs :: proc "c" (n: i32) -> i32 {
 
 @(export)
 odin_mix :: proc "c" (a, b: i32) -> i32 {
-    return (a * 31) ~^ (b * 17)
+    return (a * 31) ~ (b * 17)
 }
 
 @(export)

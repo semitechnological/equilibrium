@@ -24,14 +24,25 @@ fn find_bin(name: &str, fallbacks: &[&str]) -> Option<PathBuf> {
 
 fn main() {
     // Fix gpui build on macOS - set SDK path for bindgen
-    if let Ok(sdk_path) = std::env::var("SDKROOT").or_else(|_| std::env::var("MACOSX_SDK_PATH")) {
+    let sdk_path = std::env::var("SDKROOT")
+        .or_else(|_| std::env::var("MACOSX_SDK_PATH"))
+        .ok()
+        .filter(|sdk_path| !sdk_path.is_empty())
+        .or_else(|| {
+            Command::new("xcrun")
+                .arg("--show-sdk-path")
+                .output()
+                .ok()
+                .and_then(|output| {
+                    if output.status.success() {
+                        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+        });
+    if let Some(ref sdk_path) = sdk_path {
         if !sdk_path.is_empty() {
-            let clang_args = format!("-isysroot{}", sdk_path);
-            println!("cargo:rustc-env=BINDGEN_EXTRA_CLANG_ARGS={}", clang_args);
-        }
-    } else if let Ok(output) = Command::new("xcrun").arg("--show-sdk-path").output() {
-        if output.status.success() {
-            let sdk_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let clang_args = format!("-isysroot {}", sdk_path);
             println!("cargo:rustc-env=BINDGEN_EXTRA_CLANG_ARGS={}", clang_args);
         }
@@ -73,12 +84,12 @@ fn main() {
     let foreign = manifest.join("foreign-code");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     crepuscularity_core::build::compile_crepus("templates").expect("compile crepus templates");
-    let gui_template = manifest.join("templates/polyglot-gui.crepus");
+    let gui_template = manifest.join("templates/polyglot.crepus");
     let gui_template_source =
-        std::fs::read_to_string(&gui_template).expect("read polyglot-gui crepus template");
+        std::fs::read_to_string(&gui_template).expect("read polyglot crepus template");
     let gui_template_literal = raw_string_literal(&gui_template_source);
     let gui_template_rs = format!(
-        "fn render_crepus_shell(parts: CrepusShellParts) -> impl IntoElement {{ view! {{{gui_template_literal}}} }}\n"
+        "fn render_crepus_shell<R, P, C>(ui: PolyglotTemplate<R, P, C>) -> impl IntoElement where R: Iterator<Item = (String, bool, String, &'static str, &'static str)> + 'static, P: Iterator<Item = String> + 'static, C: Iterator<Item = String> + 'static {{ let PolyglotTemplate {{ parts, n, mode, is_gui, is_tui, is_dashboard, is_constellation, linked_count, missing_count, gui_rows, gui_constellation_preview_rows, gui_constellation_rows, pipeline_scroll: _pipeline_scroll }} = ui; let tui_rows = std::iter::empty::<(String, bool, String, &'static str, &'static str)>(); let tui_constellation_preview_rows = std::iter::empty::<String>(); let tui_constellation_rows = std::iter::empty::<String>(); view! {{{gui_template_literal}}} }}\n"
     );
     std::fs::write(out_dir.join("polyglot_gui_template.rs"), gui_template_rs)
         .expect("write polyglot GUI template");
@@ -116,7 +127,10 @@ fn main() {
         ],
     ) {
         let obj = out_dir.join("zig_module.o");
+        let zig_cache = out_dir.join("zig-cache");
         let status = Command::new(&zig)
+            .env("ZIG_LOCAL_CACHE_DIR", &zig_cache)
+            .env("ZIG_GLOBAL_CACHE_DIR", &zig_cache)
             .args([
                 "build-obj",
                 "-fPIC",
@@ -138,17 +152,21 @@ fn main() {
     if nim_path.exists() {
         let lib = out_dir.join("nim_module.a");
         let nimcache = out_dir.join("nim_cache");
-        let status = Command::new(&nim_path)
-            .args([
-                "c",
-                &format!("--nimcache:{}", nimcache.display()),
-                "--noMain",
-                "--app:staticlib",
-                "--mm:none",
-                "--passC:-fPIC",
-                &format!("-o:{}", lib.display()),
-                foreign.join("nim_module.nim").to_str().unwrap(),
-            ])
+        let mut cmd = Command::new(&nim_path);
+        cmd.args([
+            "c",
+            &format!("--nimcache:{}", nimcache.display()),
+            "--noMain",
+            "--app:staticlib",
+            "--mm:none",
+            "--passC:-fPIC",
+            &format!("-o:{}", lib.display()),
+        ]);
+        if let Some(ref sdk_path) = sdk_path {
+            cmd.arg(format!("--passC:-isysroot {}", sdk_path));
+        }
+        let status = cmd
+            .arg(foreign.join("nim_module.nim").to_str().unwrap())
             .status();
 
         if status.map(|s| s.success()).unwrap_or(false) && lib.exists() {
