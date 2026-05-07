@@ -18,3 +18,8 @@ double v_km_to_miles(double km)
 {
     return km * 0.621371;
 }
+
+double v_kelvin_to_rankine(double k)
+{
+    return k * 1.8;
+}

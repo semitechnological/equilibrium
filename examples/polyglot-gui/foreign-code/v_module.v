@@ -13,4 +13,9 @@ pub fn v_km_to_miles(km f64) f64 {
 	return km * 0.621371
 }
 
+@[export: 'v_kelvin_to_rankine']
+pub fn v_kelvin_to_rankine(k f64) f64 {
+	return k * 1.8
+}
+
 fn main() {}

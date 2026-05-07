@@ -1,4 +1,4 @@
-# Nim module — bit manipulation
+# Nim module — bit manipulation and entropy tricks
 # Compiled with: nim c --nimcache:/tmp/nim_cache --noMain --app:staticlib -o:/tmp/nim_module.a nim_module.nim
 
 proc nim_popcount*(n: uint32): int32 {.exportc, cdecl, noSideEffect.} =
@@ -16,3 +16,7 @@ proc nim_reverse_bits*(n: uint32): uint32 {.exportc, cdecl, noSideEffect.} =
     rev = (rev shl 1) or (x and 1)
     x = x shr 1
   rev
+
+proc nim_rotate_left*(n: uint32, shift: uint32): uint32 {.exportc, cdecl, noSideEffect.} =
+  let s = shift and 31'u32
+  (n shl s) or (n shr (32'u32 - s))

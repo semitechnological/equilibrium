@@ -3,21 +3,37 @@ use std::process::Command;
 
 /// Try `which` first, then fall back to known installation paths.
 fn find_bin(name: &str, fallbacks: &[&str]) -> Option<PathBuf> {
-    which::which(name).ok().or_else(|| {
-        fallbacks
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| p.exists())
-    })
+    // First try current PATH (the extra_paths from earlier in main())
+    if let Ok(p) = which::which(name) {
+        return Some(p);
+    }
+    // Then try fallbacks
+    fallbacks.iter().map(PathBuf::from).find(|p| p.exists())
 }
 
 fn main() {
+    // Fix gpui build on macOS - set SDK path for bindgen
+    if let Ok(sdk_path) = std::env::var("SDKROOT").or_else(|_| std::env::var("MACOSX_SDK_PATH")) {
+        if !sdk_path.is_empty() {
+            let clang_args = format!("-isysroot{}", sdk_path);
+            println!("cargo:rustc-env=BINDGEN_EXTRA_CLANG_ARGS={}", clang_args);
+        }
+    } else if let Ok(output) = Command::new("xcrun").arg("--show-sdk-path").output() {
+        if output.status.success() {
+            let sdk_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let clang_args = format!("-isysroot {}", sdk_path);
+            println!("cargo:rustc-env=BINDGEN_EXTRA_CLANG_ARGS={}", clang_args);
+        }
+    }
+
     // Prepend known package-manager bin dirs to PATH so child compiler
     // processes can find each other (e.g. nim calling gcc) even when cargo
     // is invoked from a shell that doesn't include linuxbrew in PATH.
     let extra_paths = [
         "/home/linuxbrew/.linuxbrew/bin",
         "/home/linuxbrew/.linuxbrew/sbin",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
         "/usr/local/sbin",
         "/usr/local/bin",
     ];
@@ -69,12 +85,15 @@ fn main() {
     emit_bindings(&foreign.join("cpp_module.h"), &out_dir, "cpp_bindings.rs");
 
     // ── Zig module (when zig is on PATH) ───────────────────────────────────
-    if let Some(zig) = find_bin("zig", &[
-        "/usr/local/sbin/zig",
-        "/usr/local/bin/zig",
-        "/home/linuxbrew/.linuxbrew/bin/zig",
-        "/opt/homebrew/bin/zig",
-    ]) {
+    if let Some(zig) = find_bin(
+        "zig",
+        &[
+            "/usr/local/sbin/zig",
+            "/usr/local/bin/zig",
+            "/home/linuxbrew/.linuxbrew/bin/zig",
+            "/opt/homebrew/bin/zig",
+        ],
+    ) {
         let obj = out_dir.join("zig_module.o");
         let status = Command::new(&zig)
             .args([
@@ -93,15 +112,12 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=foreign-code/zig_module.zig");
 
-    // ── Nim module (when nim is on PATH) ───────────────────────────────────
-    if let Some(nim) = find_bin("nim", &[
-        "/home/linuxbrew/.linuxbrew/bin/nim",
-        "/usr/local/bin/nim",
-        "/opt/homebrew/bin/nim",
-    ]) {
+    // ── Nim module ────────────────────────────────────────────────────────────
+    let nim_path = PathBuf::from("/opt/homebrew/bin/nim");
+    if nim_path.exists() {
         let lib = out_dir.join("nim_module.a");
         let nimcache = out_dir.join("nim_cache");
-        let status = Command::new(&nim)
+        let status = Command::new(&nim_path)
             .args([
                 "c",
                 &format!("--nimcache:{}", nimcache.display()),
@@ -115,7 +131,6 @@ fn main() {
             .status();
 
         if status.map(|s| s.success()).unwrap_or(false) && lib.exists() {
-            // Rename nim_module.a -> libnim_module.a so the linker finds it
             let lib_renamed = out_dir.join("libnim_module.a");
             let _ = std::fs::rename(&lib, &lib_renamed);
             println!("cargo:rustc-link-search=native={}", out_dir.display());
@@ -129,11 +144,16 @@ fn main() {
     // V's runtime-heavy object cannot link cleanly into Rust's PIE binary on
     // Linux. We detect V availability and compile a C shim with the same
     // exported symbols so the FFI calls work and has_v is set.
-    if find_bin("v", &[
-        "/home/linuxbrew/.linuxbrew/bin/v",
-        "/usr/local/bin/v",
-        "/opt/homebrew/bin/v",
-    ]).is_some() {
+    if find_bin(
+        "v",
+        &[
+            "/home/linuxbrew/.linuxbrew/bin/v",
+            "/usr/local/bin/v",
+            "/opt/homebrew/bin/v",
+        ],
+    )
+    .is_some()
+    {
         cc::Build::new()
             .file(foreign.join("v_module_shim.c"))
             .compile("v_module");
@@ -143,11 +163,14 @@ fn main() {
     println!("cargo:rerun-if-changed=foreign-code/v_module_shim.c");
 
     // ── D module (when ldc2 is on PATH) ───────────────────────────────────
-    if let Some(ldc2) = find_bin("ldc2", &[
-        "/home/linuxbrew/.linuxbrew/bin/ldc2",
-        "/usr/local/bin/ldc2",
-        "/opt/homebrew/bin/ldc2",
-    ]) {
+    if let Some(ldc2) = find_bin(
+        "ldc2",
+        &[
+            "/home/linuxbrew/.linuxbrew/bin/ldc2",
+            "/usr/local/bin/ldc2",
+            "/opt/homebrew/bin/ldc2",
+        ],
+    ) {
         let obj = out_dir.join("d_module.o");
         // Detect the ldc2 include dir from the binary path
         let ldc2_dir = ldc2
@@ -175,48 +198,65 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=foreign-code/d_module.d");
 
-    // ── Odin module (when odin is on PATH) ────────────────────────────────
-    // Odin generates multiple .o files named <stem>-<package>.o etc.
-    // We link them all.
-    let odin_bin = find_bin("odin", &[
-        "/usr/local/bin/odin",
-        "/usr/local/odin/odin",
-        "/home/linuxbrew/.linuxbrew/bin/odin",
-        "/opt/homebrew/bin/odin",
-    ]);
-    if let Some(odin) = odin_bin {
-        let odin_out = out_dir.join("odin_module.o");
-        let odin_root =
-            std::env::var("ODIN_ROOT").unwrap_or_else(|_| "/usr/local/odin".to_string());
-        let status = Command::new(&odin)
-            .env("ODIN_ROOT", &odin_root)
-            .args([
-                "build",
-                foreign.join("odin_module.odin").to_str().unwrap(),
-                "-file",
-                &format!("-out:{}", odin_out.display()),
-                "-build-mode:obj",
-                "-reloc-mode:pic",
-            ])
-            .status();
+    // ── Odin module ─────────────────────────────────────────────────────────
+    let odin_found = find_bin(
+        "odin",
+        &[
+            "/usr/local/bin/odin",
+            "/usr/local/odin/odin",
+            "/home/linuxbrew/.linuxbrew/bin/odin",
+            "/opt/homebrew/bin/odin",
+        ],
+    );
+    if let Some(odin) = odin_found {
+        let odin_root = std::env::var("ODIN_ROOT")
+            .ok()
+            .filter(|p| std::path::Path::new(p).exists())
+            .or_else(|| {
+                Command::new(&odin)
+                    .arg("root")
+                    .output()
+                    .ok()
+                    .and_then(|out| {
+                        if out.status.success() {
+                            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                        } else {
+                            None
+                        }
+                    })
+            });
 
-        if status.map(|s| s.success()).unwrap_or(false) {
-            // Odin generates several .o files with the stem prefix
-            let stem = odin_out.file_stem().unwrap().to_string_lossy().to_string();
-            let mut any_linked = false;
-            if let Ok(rd) = std::fs::read_dir(&out_dir) {
-                for entry in rd.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name.starts_with(&stem) && name.ends_with(".o") {
-                        cc::Build::new()
-                            .object(entry.path())
-                            .compile(&format!("odin_{}", name.trim_end_matches(".o")));
-                        any_linked = true;
+        if let Some(odin_root) = odin_root {
+            let odin_out = out_dir.join("odin_module.o");
+            let status = Command::new(&odin)
+                .env("ODIN_ROOT", &odin_root)
+                .args([
+                    "build",
+                    foreign.join("odin_module.odin").to_str().unwrap(),
+                    "-file",
+                    &format!("-out:{}", odin_out.display()),
+                    "-build-mode:obj",
+                    "-reloc-mode:pic",
+                ])
+                .status();
+
+            if status.map(|s| s.success()).unwrap_or(false) {
+                let stem = odin_out.file_stem().unwrap().to_string_lossy().to_string();
+                let mut any_linked = false;
+                if let Ok(rd) = std::fs::read_dir(&out_dir) {
+                    for entry in rd.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with(&stem) && name.ends_with(".o") {
+                            cc::Build::new()
+                                .object(entry.path())
+                                .compile(&format!("odin_{}", name.trim_end_matches(".o")));
+                            any_linked = true;
+                        }
                     }
                 }
-            }
-            if any_linked {
-                println!("cargo:rustc-cfg=has_odin");
+                if any_linked {
+                    println!("cargo:rustc-cfg=has_odin");
+                }
             }
         }
     }
